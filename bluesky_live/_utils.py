@@ -8,8 +8,7 @@ import dask.array
 import entrypoints
 
 
-def discover_handlers(entrypoint_group_name='databroker.handlers',
-                      skip_failures=True):
+def discover_handlers(entrypoint_group_name="databroker.handlers", skip_failures=True):
     """
     Discover handlers via entrypoints.
 
@@ -38,15 +37,18 @@ def discover_handlers(entrypoint_group_name='databroker.handlers',
                 warnings.warn(
                     f"There are {len(matches)} entrypoints for the "
                     f"databroker handler spec {name!r}. "
-                    f"They are {matches}. The match {winner} has won the race.")
+                    f"They are {matches}. The match {winner} has won the race."
+                )
     handler_registry = {}
     for name, entrypoint in group.items():
         try:
             handler_class = entrypoint.load()
         except Exception as exc:
             if skip_failures:
-                warnings.warn(f"Skipping {entrypoint!r} which failed to load. "
-                              f"Exception: {exc!r}")
+                warnings.warn(
+                    f"Skipping {entrypoint!r} which failed to load. "
+                    f"Exception: {exc!r}"
+                )
                 continue
             else:
                 raise
@@ -75,7 +77,7 @@ def parse_handler_registry(handler_registry):
     result = {}
     for spec, handler_str in handler_registry.items():
         if isinstance(handler_str, str):
-            module_name, _, class_name = handler_str.rpartition('.')
+            module_name, _, class_name = handler_str.rpartition(".")
             class_ = getattr(importlib.import_module(module_name), class_name)
         else:
             class_ = handler_str
@@ -106,21 +108,23 @@ def parse_transforms(transforms):
     {'descriptor': <package.module.function_name>}
 
     """
-    transformable = {'start', 'stop', 'resource', 'descriptor'}
+    transformable = {"start", "stop", "resource", "descriptor"}
 
     if transforms is None:
         result = {key: _no_op for key in transformable}
         return result
     elif isinstance(transforms, collections.abc.Mapping):
         if len(transforms.keys() - transformable) > 0:
-            raise NotImplementedError(f"Transforms for {transforms.keys() - transformable} "
-                                      f"are not supported.")
+            raise NotImplementedError(
+                f"Transforms for {transforms.keys() - transformable} "
+                f"are not supported."
+            )
         result = {}
 
         for name in transformable:
             transform = transforms.get(name)
             if isinstance(transform, str):
-                module_name, _, class_name = transform.rpartition('.')
+                module_name, _, class_name = transform.rpartition(".")
                 function = getattr(importlib.import_module(module_name), class_name)
             elif transform is None:
                 function = _no_op
@@ -129,8 +133,10 @@ def parse_transforms(transforms):
             result[name] = function
         return result
     else:
-        raise ValueError(f"Invalid transforms argument {transforms}. "
-                         f"transforms must be None or a dictionary.")
+        raise ValueError(
+            f"Invalid transforms argument {transforms}. "
+            f"transforms must be None or a dictionary."
+        )
 
 
 def _no_op(doc):
@@ -141,8 +147,8 @@ def _no_op(doc):
 
 def coerce_dask(handler_class, filler_state):
     # If the handler has its own delayed logic, defer to that.
-    if hasattr(handler_class, 'return_type'):
-        if handler_class.return_type['delayed']:
+    if hasattr(handler_class, "return_type"):
+        if handler_class.return_type["delayed"]:
             return handler_class
 
     # Otherwise, provide best-effort dask support by wrapping each datum
@@ -150,7 +156,6 @@ def coerce_dask(handler_class, filler_state):
     # one dask task---it cannot be rechunked into multiple tasks---but that
     # may be sufficient for many handlers.
     class Subclass(handler_class):
-
         def __call__(self, *args, **kwargs):
             descriptor = filler_state.descriptor
             key = filler_state.key
@@ -176,24 +181,24 @@ def extract_shape(descriptor, key):
     # but we have to do some heuristics to make up for errors in the reporting.
 
     # Broken ophyd reports (x, y, 0). We want (num_images, y, x).
-    data_key = descriptor['data_keys'][key]
-    if len(data_key['shape']) == 3 and data_key['shape'][-1] == 0:
-        object_keys = descriptor.get('object_keys', {})
+    data_key = descriptor["data_keys"][key]
+    if len(data_key["shape"]) == 3 and data_key["shape"][-1] == 0:
+        object_keys = descriptor.get("object_keys", {})
         for object_name, data_keys in object_keys.items():
             if key in data_keys:
                 break
         else:
             raise RuntimeError(f"Could not figure out shape of {key}")
-        for k, v in descriptor['configuration'][object_name]['data'].items():
-            if k.endswith('num_images'):
+        for k, v in descriptor["configuration"][object_name]["data"].items():
+            if k.endswith("num_images"):
                 num_images = v
                 break
         else:
             num_images = -1
-        x, y, _ = data_key['shape']
+        x, y, _ = data_key["shape"]
         shape = (num_images, y, x)
     else:
-        shape = descriptor['data_keys'][key]['shape']
+        shape = descriptor["data_keys"][key]["shape"]
     return shape
 
 
@@ -201,8 +206,8 @@ def extract_dtype(descriptor, key):
     """
     Work around the fact that we currently report jsonschema data types.
     """
-    reported = descriptor['data_keys'][key]['dtype']
-    if reported == 'array':
+    reported = descriptor["data_keys"][key]["dtype"]
+    if reported == "array":
         return float  # guess!
     else:
         return reported

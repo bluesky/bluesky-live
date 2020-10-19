@@ -63,6 +63,7 @@ class Document(dict):
         # can *truncate* which I think we want to avoid and they would require
         # more investment to understand how to use.
         from pprint import pformat
+
         return p.text(f"{self.__class__.__name__}({pformat(dict(self))})")
 
     def __getstate__(self):
@@ -127,39 +128,39 @@ def tokenize_document(instance):
 
 class Start(Document):
     def __dask_tokenize__(self):
-        return ('start', self['uid'])
+        return ("start", self["uid"])
 
 
 class Stop(Document):
     def __dask_tokenize__(self):
-        return ('stop', self['uid'])
+        return ("stop", self["uid"])
 
 
 class Resource(Document):
     def __dask_tokenize__(self):
-        return ('resource', self['uid'])
+        return ("resource", self["uid"])
 
 
 class Descriptor(Document):
     def __dask_tokenize__(self):
-        return ('descriptor', self['uid'])
+        return ("descriptor", self["uid"])
 
 
 class Event(Document):
     def __dask_tokenize__(self):
-        return ('event', self['uid'])
+        return ("event", self["uid"])
 
 
 class EventPage(Document):
     def __dask_tokenize__(self):
-        return ('event_page', self['uid'])
+        return ("event_page", self["uid"])
 
 
 class Datum(Document):
     def __dask_tokenize__(self):
-        return ('datum', self['datum_id'])
+        return ("datum", self["datum_id"])
 
 
 class DatumPage(Document):
     def __dask_tokenize__(self):
-        return ('datum_page', self['uid'])
+        return ("datum_page", self["uid"])

@@ -296,7 +296,7 @@ class BlueskyConfig:
         # this is to register this at the last possible moment to give
         # databroker every chance of running first.
         try:
-            event_model.register_coersion('delayed', coerce_dask)
+            event_model.register_coersion("delayed", coerce_dask)
         except event_model.EventModelValueError:
             # Already registered by databroker (or ourselves, earlier)
             pass
@@ -374,7 +374,7 @@ class BlueskyEventStream:
         # this is to register this at the last possible moment to give
         # databroker every chance of running first.
         try:
-            event_model.register_coersion('delayed', coerce_dask)
+            event_model.register_coersion("delayed", coerce_dask)
         except event_model.EventModelValueError:
             # Already registered by databroker (or ourselves, earlier)
             pass
