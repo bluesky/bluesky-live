@@ -1,4 +1,6 @@
 "This is vendored from databroker.core."
+import copy
+
 from dask.base import normalize_token
 
 

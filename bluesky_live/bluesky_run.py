@@ -16,7 +16,6 @@ from ._utils import (
 )
 
 
-
 class DocumentCache(event_model.SingleRunDocumentRouter):
     def __init__(self):
         self.descriptors = {}
