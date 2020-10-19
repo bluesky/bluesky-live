@@ -5,7 +5,6 @@ import warnings
 
 import dask
 import dask.array
-import event_model
 import entrypoints
 
 
@@ -166,13 +165,6 @@ def coerce_dask(handler_class, filler_state):
                 return dask.array.from_delayed(load_chunk, shape=shape, dtype=dtype)
 
     return Subclass
-
-
-# This adds a 'delayed' option to event_model.Filler's `coerce` parameter.
-# By adding it via plugin, we avoid adding a dask.array dependency to
-# event-model and we keep the fiddly hacks into extract_shape here in
-# databroker, a faster-moving and less fundamental library than event-model.
-event_model.register_coersion('delayed', coerce_dask)
 
 
 def extract_shape(descriptor, key):
