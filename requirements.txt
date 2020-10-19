@@ -1,3 +1,4 @@
+dask[array]
 entrypoints
 event-model
 numpy
