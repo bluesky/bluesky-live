@@ -397,7 +397,7 @@ class BlueskyEventStream:
         return self.to_dask().load()
 
 
-def _documents_to_xarray(
+def documents_to_xarray(
     *,
     start_doc,
     stop_doc,
@@ -409,6 +409,7 @@ def _documents_to_xarray(
     get_datum_pages,
     include=None,
     exclude=None,
+    sub_dict="data",
 ):
     """
     Represent the data in one Event stream as an xarray.
@@ -438,6 +439,8 @@ def _documents_to_xarray(
     exclude : list, optional
         Fields ('data keys') to exclude. By default none are excluded. This
         parameter is mutually exclusive with ``include``.
+    sub_dict : {"data", "timestamps"}, optional
+        Which sub-dict in the EventPage to use
 
     Returns
     -------
@@ -487,9 +490,9 @@ def _documents_to_xarray(
         else:
             filled_events = events
         times = [ev["time"] for ev in events]
-        seq_nums = [ev["seq_num"] for ev in events]
-        uids = [ev["uid"] for ev in events]
-        data_table = _transpose(filled_events, keys, "data")
+        # seq_nums = [ev["seq_num"] for ev in events]
+        # uids = [ev["uid"] for ev in events]
+        data_table = _transpose(filled_events, keys, sub_dict)
         # external_keys = [k for k in data_keys if 'external' in data_keys[k]]
 
         # Collect a DataArray for each field in Event, 'uid', and 'seq_num'.
@@ -529,12 +532,12 @@ def _documents_to_xarray(
             )
 
         # Finally, make DataArrays for 'seq_num' and 'uid'.
-        data_arrays["seq_num"] = xarray.DataArray(
-            data=seq_nums, dims=("time",), coords={"time": times}, name="seq_num"
-        )
-        data_arrays["uid"] = xarray.DataArray(
-            data=uids, dims=("time",), coords={"time": times}, name="uid"
-        )
+        # data_arrays["seq_num"] = xarray.DataArray(
+        #     data=seq_nums, dims=("time",), coords={"time": times}, name="seq_num"
+        # )
+        # data_arrays["uid"] = xarray.DataArray(
+        #     data=uids, dims=("time",), coords={"time": times}, name="uid"
+        # )
 
         datasets.append(xarray.Dataset(data_vars=data_arrays))
     # Merge Datasets from all Event Descriptors into one representing the
@@ -544,7 +547,7 @@ def _documents_to_xarray(
     return xarray.merge(datasets)
 
 
-def _documents_to_xarray_config(
+def documents_to_xarray_config(
     *,
     object_name,
     start_doc,
@@ -557,6 +560,7 @@ def _documents_to_xarray_config(
     get_datum_pages,
     include=None,
     exclude=None,
+    sub_dict="data",
 ):
     """
     Represent the data in one Event stream as an xarray.
@@ -588,6 +592,8 @@ def _documents_to_xarray_config(
     exclude : list, optional
         Fields ('data keys') to exclude. By default none are excluded. This
         parameter is mutually exclusive with ``include``.
+    sub_dict : {"data", "timestamps"}, optional
+        Which sub-dict in the EventPage to use
 
     Returns
     -------
@@ -639,7 +645,7 @@ def _documents_to_xarray_config(
             data_arrays[key] = xarray.DataArray(
                 # TODO Once we know we have one Event Descriptor
                 # per stream we can be more efficient about this.
-                data=numpy.tile(config["data"][key], (len(times),) + ndim * (1,) or 1),
+                data=numpy.tile(config[sub_dict][key], (len(times),) + ndim * (1,) or 1),
                 dims=("time",) + dims,
                 coords={"time": times},
                 name=key,
