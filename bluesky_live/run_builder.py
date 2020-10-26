@@ -364,6 +364,65 @@ def build_simple_run(
     return builder.get_run()
 
 
+def build_one_run_from_documents(document_generator):
+    """
+    Build one BlueskyRun from a stream of documents --- (name, doc) pairs.
+
+    This assumes document_generator contains documents for one run.
+    It will fail if:
+
+    * There is no 'start' document (e.g. empty generator); or
+    * There is more than one 'start' document (e.g. a stream of multiple
+      sequenced or interleaved runs).
+
+    Parameters
+    ----------
+    document_generator: Iterable[Tuple[String, Dict]]
+        Iterable of ``(name, doc)`` pairs.
+
+    Returns
+    -------
+    BlueskyRun
+    """
+    cache = DocumentCache()
+    for item in document_generator:
+        cache(*item)
+    return BlueskyRun(cache)
+
+
+def build_runs_from_documents(document_generator):
+    """
+    Build BlueskyRuns from a stream of documents --- (name, doc) pairs.
+
+    This will work for any number of runs, including 0 (empty generator).
+
+    Parameters
+    ----------
+    document_generator: Iterable[Tuple[String, Dict]]
+        Iterable of ``(name, doc)`` pairs.
+
+    Returns
+    -------
+    List[BlueskyRun]
+    """
+    runs = []
+
+    def factory(name, doc):
+        dc = DocumentCache()
+
+        def add_run_to_list(event):
+            run = BlueskyRun(dc)
+            runs.append(run)
+
+        dc.events.started.connect(add_run_to_list)
+        return [dc], []
+
+    rr = event_model.RunRouter([factory])
+    for item in document_generator:
+        rr(*item)
+    return runs
+
+
 def _infer_dtype(obj):
     "Infer the dtype for Event Descriptor data_keys based on the data."
     if isinstance(obj, (numpy.generic, numpy.ndarray)):
