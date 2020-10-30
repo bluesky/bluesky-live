@@ -111,6 +111,10 @@ class BlueskyRun(collections.abc.Mapping):
         transforms=None,
     ):
 
+        if document_cache.start_doc is None:
+            raise ValueError(
+                "The document_cache must at least have a 'start' doc before a BlueskyRun can be created from it."
+            )
         self._document_cache = document_cache
         self._streams = {}
 
