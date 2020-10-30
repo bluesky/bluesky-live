@@ -17,6 +17,18 @@ from ._utils import (
 
 
 class DocumentCache(event_model.SingleRunDocumentRouter):
+    """
+    An in-memory cache of documents from one Run.
+
+    Examples
+    --------
+
+    >>> dc = DocumentCache()
+    >>> dc('start', {'time': ..., 'uid': ...})
+    >>> list(dc)
+    [('start', {'time': ..., 'uid': ...})]
+    """
+
     def __init__(self):
         self.descriptors = {}
         self.resources = {}
