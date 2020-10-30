@@ -17,6 +17,18 @@ from ._utils import (
 
 
 class DocumentCache(event_model.SingleRunDocumentRouter):
+    """
+    An in-memory cache of documents from one Run.
+
+    Examples
+    --------
+
+    >>> dc = DocumentCache()
+    >>> dc('start', {'time': ..., 'uid': ...})
+    >>> list(dc)
+    [('start', {'time': ..., 'uid': ...})]
+    """
+
     def __init__(self):
         self.descriptors = {}
         self.resources = {}
@@ -30,40 +42,45 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         )
         # maps stream name to list of descriptors
         self._streams = {}
+        # list of (name, doc) pairs in the order they were consumed
         self._ordered = []
         super().__init__()
+
+    def __iter__(self):
+        """Yield (name, doc) pairs in the order they were consumed."""
+        yield from self._ordered
 
     @property
     def streams(self):
         return self._streams
 
-    def __call__(self, name, doc):
-        ret = super().__call__(name, doc)
-        self._ordered.append((name, doc))
-        return ret
-
     def start(self, doc):
         self.start_doc = doc
+        self._ordered.append(("start", doc))
         self.events.started()
         super().start(doc)
 
     def stop(self, doc):
+        self._ordered.append(("stop", doc))
         self.stop_doc = doc
         self.events.completed()
         super().stop(doc)
 
     def event_page(self, doc):
+        self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_data()
         super().event_page(doc)
 
     def datum_page(self, doc):
+        self._ordered.append(("datum_page", doc))
         self.datum_pages_by_resource[doc["resource"]].append(doc)
         for datum_id in doc["datum_id"]:
             self.resource_uid_by_datum_id[datum_id] = doc["resource"]
         super().datum_page(doc)
 
     def descriptor(self, doc):
+        self._ordered.append(("descriptor", doc))
         name = doc.get("name")  # Might be missing in old documents
         self.descriptors[doc["uid"]] = doc
         if name is not None and name not in self._streams:
@@ -74,6 +91,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         super().descriptor(doc)
 
     def resource(self, doc):
+        self._ordered.append(("resource", doc))
         self.resources[doc["uid"]] = doc
         super().resource(doc)
 
@@ -93,6 +111,10 @@ class BlueskyRun(collections.abc.Mapping):
         transforms=None,
     ):
 
+        if document_cache.start_doc is None:
+            raise ValueError(
+                "The document_cache must at least have a 'start' doc before a BlueskyRun can be created from it."
+            )
         self._document_cache = document_cache
         self._streams = {}
 
@@ -201,6 +223,34 @@ class BlueskyRun(collections.abc.Mapping):
         except Exception as exc:
             out = f"<{self.__class__.__name__} *REPR_RENDERING_FAILURE* {exc!r}>"
         p.text(out)
+
+    def documents(self, *, fill):
+        """
+        Give Bluesky's streaming representation.
+
+        Parameters
+        ----------
+        fill: {'yes', 'no', 'delayed'}
+            Whether and how to resolve references to external data, if any.
+
+        Yields
+        ------
+        (name, doc)
+        """
+        FILL_OPTIONS = {"yes", "no", "delayed"}
+        if fill not in FILL_OPTIONS:
+            raise ValueError(
+                f"Invalid fill option: {fill}, fill must be: {FILL_OPTIONS}"
+            )
+
+        if fill == "yes":
+            filler = self._get_filler(coerce="force_numpy")
+        elif fill == "no":
+            filler = event_model.NoFiller(self._handler_registry, inplace=True)
+        else:  # fill == 'delayed'
+            filler = self._get_filler(coerce="delayed")
+        for name, doc in self._document_cache:
+            yield filler(name, doc)
 
     @property
     def events(self):
