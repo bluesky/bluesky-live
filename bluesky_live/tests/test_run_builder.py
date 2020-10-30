@@ -69,7 +69,18 @@ def test_add_stream_from_data_keys():
     run.primary
 
 
-def test_add_data_from_various_structures():
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"x": [1, 2, 3], "y": [10, 20, 30]},
+        pandas.DataFrame({"x": [4, 5, 6], "y": [40, 50, 60]}),
+        xarray.Dataset(
+            {"x": xarray.DataArray([7, 8, 9]), "y": xarray.DataArray([70, 80, 90])}
+        ),
+    ],
+    ids=["dict-of-lists", "pandas.DataFrame", "xarray.Dataset"],
+)
+def test_add_data_from_various_structures(data):
     with RunBuilder() as builder:
         builder.add_stream(
             "primary",
@@ -78,16 +89,7 @@ def test_add_data_from_various_structures():
                 "y": {"source": "made up", "dtype": "number", "shape": []},
             },
         )
-        builder.add_data("primary", {"x": [1, 2, 3], "y": [10, 20, 30]})
-        builder.add_data(
-            "primary", pandas.DataFrame({"x": [4, 5, 6], "y": [40, 50, 60]})
-        )
-        builder.add_data(
-            "primary",
-            xarray.Dataset(
-                {"x": xarray.DataArray([7, 8, 9]), "y": xarray.DataArray([70, 80, 90])}
-            ),
-        )
+        builder.add_data("primary", data)
 
 
 def test_add_stream_from_data():
