@@ -42,6 +42,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         )
         # maps stream name to list of descriptors
         self._streams = {}
+        # list of (name, doc) pairs in the order they were consumed
         self._ordered = []
         super().__init__()
 
@@ -49,33 +50,33 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     def streams(self):
         return self._streams
 
-    def __call__(self, name, doc):
-        ret = super().__call__(name, doc)
-        self._ordered.append((name, doc))
-        return ret
-
     def start(self, doc):
         self.start_doc = doc
+        self._ordered.append(("start", doc))
         self.events.started()
         super().start(doc)
 
     def stop(self, doc):
+        self._ordered.append(("stop", doc))
         self.stop_doc = doc
         self.events.completed()
         super().stop(doc)
 
     def event_page(self, doc):
+        self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_data()
         super().event_page(doc)
 
     def datum_page(self, doc):
+        self._ordered.append(("datum_page", doc))
         self.datum_pages_by_resource[doc["resource"]].append(doc)
         for datum_id in doc["datum_id"]:
             self.resource_uid_by_datum_id[datum_id] = doc["resource"]
         super().datum_page(doc)
 
     def descriptor(self, doc):
+        self._ordered.append(("descriptor", doc))
         name = doc.get("name")  # Might be missing in old documents
         self.descriptors[doc["uid"]] = doc
         if name is not None and name not in self._streams:
@@ -86,6 +87,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         super().descriptor(doc)
 
     def resource(self, doc):
+        self._ordered.append(("resource", doc))
         self.resources[doc["uid"]] = doc
         super().resource(doc)
 
