@@ -371,7 +371,7 @@ def _infer_dtype(obj):
             obj = obj.item()
         else:
             return "array"
-    elif isinstance(obj, str):
+    if isinstance(obj, str):
         return "string"
     elif isinstance(obj, collections.abc.Iterable):
         return "array"
