@@ -224,6 +224,34 @@ class BlueskyRun(collections.abc.Mapping):
             out = f"<{self.__class__.__name__} *REPR_RENDERING_FAILURE* {exc!r}>"
         p.text(out)
 
+    def documents(self, *, fill):
+        """
+        Give Bluesky's streaming representation.
+
+        Parameters
+        ----------
+        fill: {'yes', 'no', 'delayed'}
+            Whether and how to resolve references to external data, if any.
+
+        Yields
+        ------
+        (name, doc)
+        """
+        FILL_OPTIONS = {"yes", "no", "delayed"}
+        if fill not in FILL_OPTIONS:
+            raise ValueError(
+                f"Invalid fill option: {fill}, fill must be: {FILL_OPTIONS}"
+            )
+
+        if fill == "yes":
+            filler = self._get_filler(coerce="force_numpy")
+        elif fill == "no":
+            filler = event_model.NoFiller(self._handler_registry, inplace=True)
+        else:  # fill == 'delayed'
+            filler = self._get_filler(coerce="delayed")
+        for name, doc in self._document_cache:
+            yield filler(name, doc)
+
     @property
     def events(self):
         return self._document_cache.events
