@@ -46,6 +46,10 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self._ordered = []
         super().__init__()
 
+    def __iter__(self):
+        """Yield (name, doc) pairs in the order they were consumed."""
+        yield from self._ordered
+
     @property
     def streams(self):
         return self._streams
