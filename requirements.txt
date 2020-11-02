@@ -1,6 +1,6 @@
 dask[array]
 entrypoints
-event-model
+event-model >=1.16.0
 numpy
 pandas
 xarray
