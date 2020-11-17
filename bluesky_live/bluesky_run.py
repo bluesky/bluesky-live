@@ -38,7 +38,11 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self.start_doc = None
         self.stop_doc = None
         self.events = EmitterGroup(
-            started=Event, new_stream=Event, new_data=Event, completed=Event
+            source=self,
+            started=Event,
+            new_stream=Event,
+            new_data=Event,
+            completed=Event,
         )
         # maps stream name to list of descriptors
         self._streams = {}
@@ -172,6 +176,25 @@ class BlueskyRun(collections.abc.Mapping):
 
         self._document_cache.events.new_stream.connect(on_new_stream)
 
+        # Re-emit Events emitted by self._document_cache.events. The only
+        # difference is that these Events include a reference to self, and
+        # thus subscribers will get a reference to this BlueskyRun.
+        self.events = EmitterGroup(
+            source=self, new_stream=Event, new_data=Event, completed=Event
+        )
+        # We intentionally do not re-emit self._document_cache.started, because
+        # by definition that will have fired already (and will never fire
+        # again) since we already have a 'start' document.
+        self._document_cache.events.completed.connect(
+            lambda event: self.events.completed(run=self)
+        )
+        self._document_cache.events.new_data.connect(
+            lambda event: self.events.new_data(run=self)
+        )
+        self._document_cache.events.new_stream.connect(
+            lambda event: self.events.new_stream(run=self, name=event.name)
+        )
+
     # The following three methods are required to implement the Mapping interface.
 
     def __getitem__(self, key):
@@ -251,10 +274,6 @@ class BlueskyRun(collections.abc.Mapping):
             filler = self._get_filler(coerce="delayed")
         for name, doc in self._document_cache:
             yield filler(name, doc)
-
-    @property
-    def events(self):
-        return self._document_cache.events
 
 
 class ConfigAccessor(collections.abc.Mapping):
