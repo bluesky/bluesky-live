@@ -80,8 +80,6 @@ def documents_to_xarray(
     event_dim_labels = {}
     for descriptor in descriptor_docs:
         events = list(_flatten_event_page_gen(get_event_pages(descriptor["uid"])))
-        if not events:
-            continue
         if any(data_keys[key].get("external") for key in keys):
             filler("descriptor", descriptor)
             filled_events = []
@@ -99,7 +97,7 @@ def documents_to_xarray(
         times = [ev["time"] for ev in events]
         # seq_nums = [ev["seq_num"] for ev in events]
         # uids = [ev["uid"] for ev in events]
-        data_table = _transpose(filled_events, keys, sub_dict)
+        data_table = _transpose(filled_events, keys, data_keys, sub_dict)
         # external_keys = [k for k in data_keys if 'external' in data_keys[k]]
 
         # Collect a DataArray for each field in Event, 'uid', and 'seq_num'.
@@ -223,8 +221,6 @@ def documents_to_xarray_config(
     config_dim_labels = {}
     for descriptor in descriptor_docs:
         events = list(_flatten_event_page_gen(get_event_pages(descriptor["uid"])))
-        if not events:
-            continue
         times = [ev["time"] for ev in events]
         # external_keys = [k for k in data_keys if 'external' in data_keys[k]]
 
@@ -340,7 +336,7 @@ def _fill(
         )
 
 
-def _transpose(in_data, keys, field):
+def _transpose(in_data, keys, data_keys, field):
     """Turn a list of dicts into dict of lists
 
     Parameters
@@ -371,11 +367,11 @@ def _transpose(in_data, keys, field):
             out[k][j] = dd[k]
     for k in keys:
         try:
-            # compatibility with dask < 2
-            if hasattr(out[k][0], "shape"):
+            if len(out[k]):
                 out[k] = dask.array.stack(out[k])
             else:
-                out[k] = dask.array.array(out[k])
+                # Case of no Events yet
+                out[k] = dask.array.array([]).reshape(0, *data_keys[k]["shape"])
         except NotImplementedError:
             # There are data structured that dask auto-chunking cannot handle,
             # such as an list of list of variable length. For now, let these go
