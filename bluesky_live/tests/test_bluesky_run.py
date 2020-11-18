@@ -15,6 +15,20 @@ def test_empty():
         BlueskyRun(dc)
 
 
+def test_read_empty_stream():
+    "An empty stream should return a xarray with no data but the right columns."
+
+    with RunBuilder() as builder:
+        builder.add_stream(
+            "primary",
+            data_keys={"a": {"shape": [10, 10], "dtype": "number", "source": "stuff"}},
+        )
+    run = builder.get_run()
+    ds = run.primary.read()
+    assert "a" in ds
+    assert ds["a"].shape == (0, 10, 10)
+
+
 def test_events():
     "Test the Event EmitterGroup on BlueskyRun."
     # We will subscribe callbacks that appent Events to these lists.
