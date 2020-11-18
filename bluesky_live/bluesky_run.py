@@ -140,6 +140,22 @@ class BlueskyRun(collections.abc.Mapping):
             "start": Start(self._transforms["start"](document_cache.start_doc))
         }
 
+        # Re-emit Events emitted by self._document_cache.events. The only
+        # difference is that these Events include a reference to self, and
+        # thus subscribers will get a reference to this BlueskyRun.
+        self.events = EmitterGroup(
+            source=self, new_stream=Event, new_data=Event, completed=Event
+        )
+        # We intentionally do not re-emit self._document_cache.started, because
+        # by definition that will have fired already (and will never fire
+        # again) since we already have a 'start' document.
+
+        self._document_cache.events.new_data.connect(
+            lambda event: self.events.new_data(run=self)
+        )
+        # The `completed` and `new_stream` Events are emitted below *after* we
+        # update our internal state.
+
         # Wire up notification for when 'stop' doc is emitted or add it now if
         # it is already present.
         if self._document_cache.stop_doc is None:
@@ -149,6 +165,7 @@ class BlueskyRun(collections.abc.Mapping):
                 self.metadata["stop"] = Stop(
                     self._transforms["stop"](self._document_cache.stop_doc)
                 )
+                self.events.completed(run=self)
 
             self._document_cache.events.completed.connect(on_completed)
         else:
@@ -173,27 +190,10 @@ class BlueskyRun(collections.abc.Mapping):
                 self._transforms["descriptor"],
             )
             self._streams[event.name] = stream
+            self.events.new_stream(name=event.name, run=self)
 
         self._document_cache.events.new_stream.connect(on_new_stream)
 
-        # Re-emit Events emitted by self._document_cache.events. The only
-        # difference is that these Events include a reference to self, and
-        # thus subscribers will get a reference to this BlueskyRun.
-        self.events = EmitterGroup(
-            source=self, new_stream=Event, new_data=Event, completed=Event
-        )
-        # We intentionally do not re-emit self._document_cache.started, because
-        # by definition that will have fired already (and will never fire
-        # again) since we already have a 'start' document.
-        self._document_cache.events.completed.connect(
-            lambda event: self.events.completed(run=self)
-        )
-        self._document_cache.events.new_data.connect(
-            lambda event: self.events.new_data(run=self)
-        )
-        self._document_cache.events.new_stream.connect(
-            lambda event: self.events.new_stream(run=self, name=event.name)
-        )
 
     # The following three methods are required to implement the Mapping interface.
 

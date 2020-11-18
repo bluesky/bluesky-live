@@ -51,3 +51,19 @@ def test_events():
     assert len(new_data_events) == 2
     assert len(completed_events) == 1
     assert completed_events[0].run is run
+
+
+def test_access_stream_in_callback():
+    "Test that the stream is accessible when new_stream fires."
+
+    with RunBuilder() as builder:
+        run = builder.get_run()
+
+        def access_stream(event):
+            run[event.name]
+
+        run.events.new_stream.connect(access_stream)
+        builder.add_stream(
+            "primary",
+            data_keys={"b": {"shape": [10, 10], "dtype": "number", "source": "stuff"}},
+        )
