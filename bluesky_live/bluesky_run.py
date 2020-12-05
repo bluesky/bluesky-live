@@ -2,6 +2,7 @@ import collections
 import collections.abc
 from datetime import datetime
 import functools
+import threading
 
 import event_model
 
@@ -30,6 +31,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     """
 
     def __init__(self):
+        self.write_lock = threading.RLock()
         self.descriptors = {}
         self.resources = {}
         self.event_pages = collections.defaultdict(list)
@@ -120,6 +122,7 @@ class BlueskyRun(collections.abc.Mapping):
                 "The document_cache must at least have a 'start' doc before a BlueskyRun can be created from it."
             )
         self._document_cache = document_cache
+        self.write_lock = self._document_cache.write_lock
         self._streams = {}
 
         self._root_map = root_map or {}
@@ -193,7 +196,6 @@ class BlueskyRun(collections.abc.Mapping):
             self.events.new_stream(name=event.name, run=self)
 
         self._document_cache.events.new_stream.connect(on_new_stream)
-
 
     # The following three methods are required to implement the Mapping interface.
 
