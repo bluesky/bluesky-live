@@ -6,6 +6,8 @@ from .event import EmitterGroup, Event
 
 
 class ListModel:
+    __slots__ = ("__internal_list", "events", "__weakref__")
+
     def __init__(self, iterable=None):
         self.__internal_list = list(iterable or [])
         self.events = EmitterGroup(
