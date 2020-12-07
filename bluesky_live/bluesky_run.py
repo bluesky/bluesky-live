@@ -19,10 +19,12 @@ from ._utils import (
 
 def _write_locked(method):
     "This is used by DocumentCache to holds it write_lock during method calls."
+
     @functools.wraps(method)
     def inner(self, *args, **kwargs):
         with self.write_lock:
             return method(self, *args, **kwargs)
+
     return inner
 
 
