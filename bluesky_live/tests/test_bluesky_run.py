@@ -1,3 +1,6 @@
+import time
+import threading
+
 import pytest
 
 from ..bluesky_run import BlueskyRun, DocumentCache
@@ -81,3 +84,41 @@ def test_access_stream_in_callback():
             "primary",
             data_keys={"b": {"shape": [10, 10], "dtype": "number", "source": "stuff"}},
         )
+
+
+def test_write_lock():
+    "It should not be possible to add data without holding the write_lock."
+
+    def worker(run, locked, failed):
+        "Check that no data is added while the write_lock is held."
+        with run.write_lock:
+            # Signal that we have the lock.
+            locked.set()
+            if len(run.primary.read()["a"]):
+                failed.set()
+            time.sleep(0.1)
+            if len(run.primary.read()["a"]):
+                failed.set()
+            time.sleep(0.1)
+            if len(run.primary.read()["a"]):
+                failed.set()
+
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        locked = threading.Event()
+        failed = threading.Event()
+        builder.add_stream(
+            "primary",
+            data_keys={"a": {"shape": [], "dtype": "number", "source": "stuff"}},
+        )
+        thread = threading.Thread(target=worker, args=(run, locked, failed))
+        thread.start()
+        locked.wait()
+        # This should be blocked until the lock is released.
+        # We'll check below that it was.
+        builder.add_data("primary", {"a": [1, 2, 3]})
+        time.sleep(0.1)
+        # But it should have data now...
+        assert bool(len(run.primary.read()["a"]))
+        thread.join()
+        assert not failed.is_set()

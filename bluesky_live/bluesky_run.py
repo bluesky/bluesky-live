@@ -2,6 +2,7 @@ import collections
 import collections.abc
 from datetime import datetime
 import functools
+import threading
 
 import event_model
 
@@ -14,6 +15,15 @@ from ._utils import (
     parse_transforms,
     parse_handler_registry,
 )
+
+
+def _write_locked(method):
+    "This is used by DocumentCache to holds it write_lock during method calls."
+    @functools.wraps(method)
+    def inner(self, *args, **kwargs):
+        with self.write_lock:
+            return method(self, *args, **kwargs)
+    return inner
 
 
 class DocumentCache(event_model.SingleRunDocumentRouter):
@@ -30,6 +40,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     """
 
     def __init__(self):
+        self.write_lock = threading.RLock()
         self.descriptors = {}
         self.resources = {}
         self.event_pages = collections.defaultdict(list)
@@ -58,24 +69,28 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     def streams(self):
         return self._streams
 
+    @_write_locked
     def start(self, doc):
         self.start_doc = doc
         self._ordered.append(("start", doc))
         self.events.started()
         super().start(doc)
 
+    @_write_locked
     def stop(self, doc):
         self._ordered.append(("stop", doc))
         self.stop_doc = doc
         self.events.completed()
         super().stop(doc)
 
+    @_write_locked
     def event_page(self, doc):
         self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_data()
         super().event_page(doc)
 
+    @_write_locked
     def datum_page(self, doc):
         self._ordered.append(("datum_page", doc))
         self.datum_pages_by_resource[doc["resource"]].append(doc)
@@ -83,6 +98,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             self.resource_uid_by_datum_id[datum_id] = doc["resource"]
         super().datum_page(doc)
 
+    @_write_locked
     def descriptor(self, doc):
         self._ordered.append(("descriptor", doc))
         name = doc.get("name")  # Might be missing in old documents
@@ -94,6 +110,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             self._streams[name].append(doc)
         super().descriptor(doc)
 
+    @_write_locked
     def resource(self, doc):
         self._ordered.append(("resource", doc))
         self.resources[doc["uid"]] = doc
@@ -120,6 +137,7 @@ class BlueskyRun(collections.abc.Mapping):
                 "The document_cache must at least have a 'start' doc before a BlueskyRun can be created from it."
             )
         self._document_cache = document_cache
+        self.write_lock = self._document_cache.write_lock
         self._streams = {}
 
         self._root_map = root_map or {}
@@ -193,7 +211,6 @@ class BlueskyRun(collections.abc.Mapping):
             self.events.new_stream(name=event.name, run=self)
 
         self._document_cache.events.new_stream.connect(on_new_stream)
-
 
     # The following three methods are required to implement the Mapping interface.
 
