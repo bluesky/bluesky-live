@@ -10,7 +10,6 @@ from .document import Start, Stop, Descriptor
 from .event import EmitterGroup, Event
 from .conversion import documents_to_xarray, documents_to_xarray_config
 from ._utils import (
-    coerce_dask,
     discover_handlers,
     parse_transforms,
     parse_handler_registry,
@@ -376,16 +375,6 @@ class BlueskyConfig:
             if skip != 0 and limit is not None:
                 raise NotImplementedError
             return document_cache.datum_pages_by_resource[resource_uid]
-
-        # This creates a potential conflict with databroker, which currently
-        # tries to register the same thing. For now our best effort to avoid
-        # this is to register this at the last possible moment to give
-        # databroker every chance of running first.
-        try:
-            event_model.register_coersion("delayed", coerce_dask)
-        except event_model.EventModelValueError:
-            # Already registered by databroker (or ourselves, earlier)
-            pass
 
         filler = self._stream._get_filler(coerce="delayed")
 
