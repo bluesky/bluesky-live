@@ -512,13 +512,16 @@ class EventEmitter:
     def _invoke_callback(self, cb, event):
         try:
             cb(event)
-        except Exception:
-            _handle_exception(
-                self.ignore_callback_errors,
-                self.print_callback_errors,
-                self,
-                cb_event=(cb, event),
-            )
+        except Exception as err:
+            if not self.ignore_callback_errors:
+                message = (
+                    f"Encountered exception while processing "
+                    f"Event {event!r} from {self.source!r} "
+                    f"with callback {cb!r}"
+                )
+                raise CallbackException(message) from err
+            else:
+                logger.exception(message)
 
     def _prepare_event(self, *args, **kwargs):
         # When emitting, this method is called to create or otherwise alter
@@ -864,3 +867,7 @@ class EventBlockerAll:
 
     def __exit__(self, *args):
         self.target.unblock_all()
+
+
+class CallbackException(Exception):
+    pass
