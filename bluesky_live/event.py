@@ -56,12 +56,13 @@ from collections import OrderedDict
 import inspect
 import logging
 import traceback
+import warnings
 import weakref
 
 logger = logging.getLogger(__name__)
 
 
-class Event(object):
+class Event:
 
     """Class describing events that occur and can be reacted to with callbacks.
     Each event instance contains information about a single event that has
@@ -174,8 +175,8 @@ class Event(object):
                     continue
                 attr = getattr(self, name)
 
-                attrs.append("%s=%s" % (name, attr))
-            return "<%s %s>" % (self.__class__.__name__, " ".join(attrs))
+                attrs.append(f"{name}={attr}")
+            return "<{} {}>".format(self.__class__.__name__, " ".join(attrs))
         finally:
             _event_repr_depth -= 1
 
@@ -187,7 +188,7 @@ class Event(object):
 _event_repr_depth = 0
 
 
-class EventEmitter(object):
+class EventEmitter:
 
     """Encapsulates a list of event callbacks.
 
@@ -449,14 +450,13 @@ class EventEmitter(object):
         return callback
 
     def __call__(self, *args, **kwargs):
-        """Invoke all callbacks for this emitter.
+        """__call__(**kwargs)
+        Invoke all callbacks for this emitter.
 
         Emit a new event object, created with the given keyword
         arguments, which must match with the input arguments of the
         corresponding event class. Note that the 'type' argument is
-        filled in by the emitter. If no kwargs and only a single arg is
-        passed (that is not an instance of self.event_class), then assume that
-        that argument is a value emitted with the 'value' kwarg.
+        filled in by the emitter.
 
         Alternatively, the emitter can also be called with an Event
         instance as the only argument. In this case, the specified
@@ -512,8 +512,16 @@ class EventEmitter(object):
     def _invoke_callback(self, cb, event):
         try:
             cb(event)
-        except Exception:
-            logger.exception("Error in callback %r processing Event %r", cb, event)
+        except Exception as err:
+            if not self.ignore_callback_errors:
+                message = (
+                    f"Encountered exception while processing "
+                    f"Event {event!r} from {self.source!r} "
+                    f"with callback {cb!r}"
+                )
+                raise CallbackException(message) from err
+            else:
+                logger.exception(message)
 
     def _prepare_event(self, *args, **kwargs):
         # When emitting, this method is called to create or otherwise alter
@@ -523,23 +531,16 @@ class EventEmitter(object):
             event = args[0]
             # Ensure that the given event matches what we want to emit
             assert isinstance(event, self.event_class)
-            return event
-
-        if len(args) == 1:
-            if not kwargs:
-                # if an EventEmitter is called with a single argument (that is
-                # not an instance of self.event_class), assume that that
-                # argument is a value to be emitted.
-                kwargs["value"] = args[0]
-            else:
-                raise ValueError(
-                    "Event emitters may be called with an Event instance, "
-                    "a single argument, or with keyword arguments only."
-                    f"\ngot: args={args}, kwargs={kwargs} "
-                )
-        args = self.default_args.copy()
-        args.update(kwargs)
-        return self.event_class(**args)
+        elif not args:
+            args = self.default_args.copy()
+            args.update(kwargs)
+            event = self.event_class(**args)
+        else:
+            raise ValueError(
+                "Event emitters can be called with an Event "
+                "instance or with keyword arguments only."
+            )
+        return event
 
     def blocked(self, callback=None):
         """Return boolean indicating whether the emitter is blocked for
@@ -616,7 +617,6 @@ class WarningEmitter(EventEmitter):
             return
 
         traceback.print_stack()
-        # TODO Define this.
         logger.warning(self._message)
         self._warned = True
 
@@ -655,14 +655,17 @@ class EmitterGroup(EventEmitter):
         <vispy.event.EventEmitter.connect>`.
         This provides a simple mechanism for automatically connecting a large
         group of emitters to default callbacks.
+    deprecated: dict
+        dict with mapping old emitter name to new emitter name
     emitters : keyword arguments
         See the :func:`add <vispy.event.EmitterGroup.add>` method.
     """
 
-    def __init__(self, source=None, auto_connect=True, **emitters):
+    def __init__(self, source=None, auto_connect=True, deprecated=None, **emitters):
         EventEmitter.__init__(self, source)
 
         self.auto_connect = auto_connect
+        self._deprecated = {} if deprecated is None else deprecated
         self.auto_connect_format = "on_%s"
         self._emitters = OrderedDict()
         # whether the sub-emitters have been connected to the group:
@@ -675,6 +678,12 @@ class EmitterGroup(EventEmitter):
         Note that emitters may also be retrieved as an attribute of the
         EmitterGroup.
         """
+        if name in self._deprecated:
+            warnings.warn(
+                f"emitter {name} is deprecated, {self._deprecated[name]} provided instead",
+                category=FutureWarning,
+            ),
+            return self._emitters[self._deprecated[name]]
         return self._emitters[name]
 
     def __setitem__(self, name, emitter):
@@ -753,8 +762,7 @@ class EmitterGroup(EventEmitter):
         """
         Iterates over the names of emitters in this group.
         """
-        for k in self._emitters:
-            yield k
+        yield from self._emitters
 
     def block_all(self):
         """Block all emitters in this group."""
@@ -804,7 +812,7 @@ class EmitterGroup(EventEmitter):
 
     @property
     def ignore_callback_errors(self):
-        return super(EventEmitter, self).ignore_callback_errors
+        return super().ignore_callback_errors
 
     @ignore_callback_errors.setter
     def ignore_callback_errors(self, ignore):
@@ -815,8 +823,20 @@ class EmitterGroup(EventEmitter):
             elif isinstance(emitter, EmitterGroup):
                 emitter.ignore_callback_errors_all(ignore)
 
+    def blocker_all(self):
+        """Return an EventBlockerAll to be used in 'with' statements
 
-class EventBlocker(object):
+        Notes
+        -----
+        For example, one could do::
+
+            with emitter.blocker_all():
+                pass  # ..do stuff; no events will be emitted..
+        """
+        return EventBlockerAll(self)
+
+
+class EventBlocker:
 
     """Represents a block for an EventEmitter to be used in a context
     manager (i.e. 'with' statement).
@@ -831,3 +851,23 @@ class EventBlocker(object):
 
     def __exit__(self, *args):
         self.target.unblock(self.callback)
+
+
+class EventBlockerAll:
+
+    """Represents a block_all for an EmitterGroup to be used in a context
+    manager (i.e. 'with' statement).
+    """
+
+    def __init__(self, target):
+        self.target = target
+
+    def __enter__(self):
+        self.target.block_all()
+
+    def __exit__(self, *args):
+        self.target.unblock_all()
+
+
+class CallbackException(Exception):
+    pass

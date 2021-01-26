@@ -13,7 +13,9 @@ class ListModel:
         self.events = EmitterGroup(
             source=self,
             auto_connect=True,
+            adding=Event,  # about to add  (unless callbacks raise exceptions)
             added=Event,
+            removing=Event,  # about to remove (unless callbacks raise exceptions)
             removed=Event,
         )
 
@@ -26,6 +28,8 @@ class ListModel:
 
     def __setitem__(self, index, obj):
         old = self.__internal_list[index]
+        self.events.removing(item=old, index=index)
+        self.events.adding(item=obj, index=index)
         self.__internal_list[index] = obj
         self.events.removed(item=old, index=index)
         self.events.added(item=obj, index=index)
@@ -34,12 +38,15 @@ class ListModel:
         return len(self.__internal_list)
 
     def insert(self, index, obj):
+        self.events.adding(item=obj, index=index)
         self.__internal_list.insert(index, obj)
         self.events.added(item=obj, index=index)
 
     def append(self, obj):
+        index = len(self)
+        self.events.adding(item=obj, index=index)
         self.__internal_list.append(obj)
-        self.events.added(item=obj, index=len(self) - 1)
+        self.events.added(item=obj, index=index)
 
     def extend(self, iterable):
         for obj in iterable:
@@ -47,18 +54,23 @@ class ListModel:
 
     def pop(self, index=-1):
         obj = self.__internal_list.pop(index)
+        self.events.removing(item=obj, index=index)
         self.events.removed(item=obj, index=index)
         return obj
 
     def remove(self, obj):
         index = self.__internal_list.index(obj)
+        self.events.removing(item=obj, index=index)
         self.__internal_list.remove(obj)
         self.events.removed(item=obj, index=index)
 
     def clear(self):
         while True:
             try:
-                obj = self.__internal_list.pop()
+                obj = self.__internal_list[-1]
+                self.events.removing(item=obj, index=-1)
+                obj_ = self.__internal_list.pop()
+                assert obj is obj_
             except IndexError:
                 break
             self.events.removed(item=obj, index=-1)
