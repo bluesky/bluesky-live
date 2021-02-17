@@ -56,6 +56,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             new_stream=Event,
             new_data=Event,
             completed=Event,
+            new_doc=Event,
         )
         # maps stream name to list of descriptors
         self._streams = {}
@@ -75,6 +76,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     def start(self, doc):
         self.start_doc = doc
         self._ordered.append(("start", doc))
+        self.events.new_doc(name="start", doc=doc)
         self.events.started()
         super().start(doc)
 
@@ -82,6 +84,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     def stop(self, doc):
         self._ordered.append(("stop", doc))
         self.stop_doc = doc
+        self.events.new_doc(name="stop", doc=doc)
         self.events.completed()
         super().stop(doc)
 
@@ -89,7 +92,10 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     def event_page(self, doc):
         self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
-        self.events.new_data()
+        self.events.new_doc(name="event_page", doc=doc)
+        self.events.new_data(
+            updated={self.descriptors[doc["descriptor"]]["name"]: len(doc["seq_num"])}
+        )
         super().event_page(doc)
 
     @_write_locked
@@ -98,6 +104,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self.datum_pages_by_resource[doc["resource"]].append(doc)
         for datum_id in doc["datum_id"]:
             self.resource_uid_by_datum_id[datum_id] = doc["resource"]
+        self.events.new_doc(name="datum_page", doc=doc)
         super().datum_page(doc)
 
     @_write_locked
@@ -110,12 +117,14 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             self.events.new_stream(name=name)
         else:
             self._streams[name].append(doc)
+        self.events.new_doc(name="descriptor", doc=doc)
         super().descriptor(doc)
 
     @_write_locked
     def resource(self, doc):
         self._ordered.append(("resource", doc))
         self.resources[doc["uid"]] = doc
+        self.events.new_doc(name="resource", doc=doc)
         super().resource(doc)
 
 
@@ -164,14 +173,21 @@ class BlueskyRun(collections.abc.Mapping):
         # difference is that these Events include a reference to self, and
         # thus subscribers will get a reference to this BlueskyRun.
         self.events = EmitterGroup(
-            source=self, new_stream=Event, new_data=Event, completed=Event
+            source=self,
+            new_stream=Event,
+            new_data=Event,
+            completed=Event,
+            new_doc=Event,
         )
         # We intentionally do not re-emit self._document_cache.started, because
         # by definition that will have fired already (and will never fire
         # again) since we already have a 'start' document.
 
         self._document_cache.events.new_data.connect(
-            lambda event: self.events.new_data(run=self)
+            lambda event: self.events.new_data(run=self, updated=event.updated)
+        )
+        self._document_cache.events.new_doc.connect(
+            lambda event: self.events.new_doc(run=self, name=event.name, doc=event.doc)
         )
         # The `completed` and `new_stream` Events are emitted below *after* we
         # update our internal state.
