@@ -124,7 +124,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
     def resource(self, doc):
         self._ordered.append(("resource", doc))
         self.resources[doc["uid"]] = doc
-        self.events.new_doc(name="datum_page", doc=doc)
+        self.events.new_doc(name="resource", doc=doc)
         super().resource(doc)
 
 
