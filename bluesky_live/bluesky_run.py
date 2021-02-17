@@ -94,7 +94,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_doc(name="event_page", doc=doc)
         self.events.new_data(
-            update={self.descriptors[doc["descriptor"]]["name"]: len(doc["seq_num"])}
+            updated={self.descriptors[doc["descriptor"]]["name"]: len(doc["seq_num"])}
         )
         super().event_page(doc)
 
@@ -184,7 +184,7 @@ class BlueskyRun(collections.abc.Mapping):
         # again) since we already have a 'start' document.
 
         self._document_cache.events.new_data.connect(
-            lambda event: self.events.new_data(run=self, update=event.update)
+            lambda event: self.events.new_data(run=self, updated=event.updated)
         )
         self._document_cache.events.new_doc.connect(
             lambda event: self.events.new_doc(run=self, name=event.name, doc=event.doc)
