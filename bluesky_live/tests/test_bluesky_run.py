@@ -38,12 +38,14 @@ def test_events():
     new_stream_events = list()
     new_data_events = list()
     completed_events = list()
+    new_doc_events = list()
 
     with RunBuilder() as builder:
         run = builder.get_run()
         run.events.new_stream.connect(lambda event: new_stream_events.append(event))
         run.events.new_data.connect(lambda event: new_data_events.append(event))
         run.events.completed.connect(lambda event: completed_events.append(event))
+        run.events.new_doc.connect(lambda event: new_doc_events.append(event))
         assert not new_stream_events
         assert not new_data_events
         assert not completed_events
@@ -68,6 +70,11 @@ def test_events():
     assert len(new_data_events) == 2
     assert len(completed_events) == 1
     assert completed_events[0].run is run
+
+    actual_docs = [(ev.name, ev.doc) for ev in new_doc_events]
+    # Omit first ('start') doc because subscriber is too late to see it.
+    expected_docs = list(run.documents(fill="no"))[1:]
+    assert actual_docs == expected_docs
 
 
 def test_access_stream_in_callback():
