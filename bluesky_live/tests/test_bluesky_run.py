@@ -56,12 +56,14 @@ def test_events():
         assert new_stream_events[0].name == "primary"
         assert len(new_data_events) == 1
         assert new_data_events[0].run is run
+        assert new_data_events[0].updated == {"primary": 3}
         assert len(completed_events) == 0
 
         builder.add_data("primary", data={"a": [1, 2, 3]})
         assert len(new_stream_events) == 1
         assert len(new_data_events) == 2
         assert new_data_events[1].run is run
+        assert new_data_events[0].updated == {"primary": 3}
         assert len(completed_events) == 0
 
     # Exiting the context issues a 'stop' document....
