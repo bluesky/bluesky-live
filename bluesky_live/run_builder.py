@@ -203,7 +203,7 @@ class RunBuilder:
         if timestamps is None:
             timestamps = {k: [now] * len_ for k in data}
         if seq_num is None:
-            seq_num = list(range(len_))
+            seq_num = (1 + numpy.arange(len_, dtype=int)).tolist()
         bundle = self._streams[name]
         doc = bundle.compose_event_page(
             time=time,
