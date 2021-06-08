@@ -149,3 +149,9 @@ def test_add_stream_from_data_keys_with_extras():
             timestamps={"x": [1, 2, 3], "y": [10, 20, 30]},
         )
     builder.get_run()
+
+
+def test_boolean_data():
+    with RunBuilder() as builder:
+        builder.add_stream("primary", data=[True, False, True])
+    builder.get_run()

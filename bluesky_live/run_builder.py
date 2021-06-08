@@ -435,7 +435,7 @@ def _infer_dtype(obj):
     elif isinstance(obj, collections.abc.Iterable):
         return "array"
     elif isinstance(obj, bool):
-        return "bool"
+        return "boolean"
     elif isinstance(obj, int):
         return "integer"
     else:
