@@ -153,5 +153,5 @@ def test_add_stream_from_data_keys_with_extras():
 
 def test_boolean_data():
     with RunBuilder() as builder:
-        builder.add_stream("primary", data=[True, False, True])
+        builder.add_stream("primary", data={"a": [True, False, True]})
     builder.get_run()
