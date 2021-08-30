@@ -126,7 +126,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self.descriptors[doc["uid"]] = doc
         if name is not None and name not in self._streams:
             self._streams[name] = [doc]
-            self.new_data_events.add(name=Event)
+            self.new_data_events.add(**{name: Event})
             self.events.new_stream(name=name)
         else:
             self._streams[name].append(doc)
