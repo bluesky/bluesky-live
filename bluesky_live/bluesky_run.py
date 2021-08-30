@@ -442,10 +442,14 @@ class BlueskyEventStream:
         self._get_filler = get_filler
         self._transform = transform
         self.config = ConfigAccessor(self)
-        # dict of lists of arrays
-        self.blocks = {key: [] for key in self._document_cache.descriptors.keys()}
+        # We need the data_keys, which are the same for any descriptor in this
+        # stream, so we can grab the first one.
+        descriptor = self._document_cache.streams[self._stream_name][0]
+        data_keys = descriptor["data_keys"]
         # shape for evey block; use to determine shape needed later on
-        self.shapes = {key: descriptor[key]["shape"] for key, descriptor in self._document_cache.descriptors.items()}
+        self.shapes = {key: data_key["shape"] for key, data_key in data_keys.items()}
+        # dict of lists of arrays
+        self.blocks = {key: [] for key in data_keys}
         self.allocated_rows = 0
         self.block_edges = [0]
         self._document_cache.new_data_events[self._stream_name].connect(self._on_new_data)
