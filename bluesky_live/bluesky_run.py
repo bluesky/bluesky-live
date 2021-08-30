@@ -5,6 +5,7 @@ import functools
 import threading
 
 import event_model
+import numpy
 
 from .document import Start, Stop, Descriptor
 from .event import EmitterGroup, Event
