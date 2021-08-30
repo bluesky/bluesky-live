@@ -472,7 +472,8 @@ class BlueskyEventStream:
         # else:
         # data totally fits into current blocks we have
         offset = self.block_edges[-2]
-        for key, block in self.blocks.items():
+        for key, blocks in self.blocks.items():
+            block = blocks[-1]
             block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset] = event_page["data"][key]
 
     @property
