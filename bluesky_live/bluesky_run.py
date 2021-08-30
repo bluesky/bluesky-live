@@ -103,6 +103,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             updated={name: len(doc["seq_num"])}
         )
         self.new_data_events[name](
+            descriptor_uid=doc["descriptor"],
             num_rows=len(doc["seq_num"]),
             first_seq_num=doc["seq_num"][0],
             update_index=len(self.event_pages[doc["descriptor"]]) - 1
@@ -460,7 +461,7 @@ class BlueskyEventStream:
     def _on_new_data(self, event):
         # do we need new blocks
         requested_rows = (event.first_seq_num - 1 + event.num_rows) - self.allocated_rows
-        event_page = self._document_cache.event_pages[self._stream_name][event.update_index]
+        event_page = self._document_cache.event_pages[event.descriptor_uid][event.update_index]
         if requested_rows > 0:
             self._allocate_blocks(requested_rows)
             # TODO
