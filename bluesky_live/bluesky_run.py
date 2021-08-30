@@ -17,6 +17,9 @@ from ._utils import (
 )
 
 
+EVENTS_PER_BLOCK = 5
+
+
 def _write_locked(method):
     "This is used by DocumentCache to holds it write_lock during method calls."
 
@@ -58,6 +61,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             completed=Event,
             new_doc=Event,
         )
+        self.new_data_events = EmitterGroup(source=self)
         # maps stream name to list of descriptors
         self._streams = {}
         # list of (name, doc) pairs in the order they were consumed
@@ -90,11 +94,17 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
 
     @_write_locked
     def event_page(self, doc):
+        name = self.descriptors[doc["descriptor"]]["name"]
         self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_doc(name="event_page", doc=doc)
         self.events.new_data(
-            updated={self.descriptors[doc["descriptor"]]["name"]: len(doc["seq_num"])}
+            updated={name: len(doc["seq_num"])}
+        )
+        self.new_data_events[name](
+            num_rows=len(doc["seq_num"]),
+            first_seq_num=doc["seq_num"][0],
+            update_index=len(self.event_pages[doc["descriptor"]]) - 1
         )
         super().event_page(doc)
 
@@ -114,6 +124,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self.descriptors[doc["uid"]] = doc
         if name is not None and name not in self._streams:
             self._streams[name] = [doc]
+            self.new_data_events.add(name=Event)
             self.events.new_stream(name=name)
         else:
             self._streams[name].append(doc)
@@ -429,6 +440,34 @@ class BlueskyEventStream:
         self._get_filler = get_filler
         self._transform = transform
         self.config = ConfigAccessor(self)
+        # dict of lists of arrays
+        self.blocks = {key: [] for key in self._document_cache.descriptors.keys()}
+        # shape for evey block; use to determine shape needed later on
+        self.shapes = {key: descriptor[key]["shape"] for key, descriptor in self._document_cache.descriptors.items()}
+        self.allocated_rows = 0
+        self.block_edges = [0]
+        self._document_cache.new_data_events[self._stream_name].connect(self._on_new_data)
+
+    def _allocate_blocks(self, requested_rows):
+        # add a row of blocks
+        num_rows = max(EVENTS_PER_BLOCK, requested_rows)
+        for key in self.blocks:
+            self.blocks[key].append(numpy.empty((num_rows, *self.shapes[key])))
+        self.allocated_rows += num_rows
+        self.block_edges.append(self.block_edges[-1] + num_rows)
+
+    def _on_new_data(self, event):
+        # do we need new blocks
+        requested_rows = (event.first_seq_num - 1 + event.num_rows) - self.allocated_rows
+        event_page = self._document_cache.event_pages[self._stream_name][event.update_index]
+        if requested_rows > 0:
+            self._allocate_blocks(requested_rows)
+            # TODO
+        # else:
+        # data totally fits into current blocks we have
+        offset = self.block_edges[-2]
+        for key, block in self.blocks.items():
+            block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset] = event_page["data"][key]
 
     @property
     def name(self):
@@ -445,7 +484,7 @@ class BlueskyEventStream:
         ]
 
     def to_dask(self):
-
+        print("*** bluesky-live to_dask")
         document_cache = self._document_cache
 
         def get_event_pages(descriptor_uid, skip=0, limit=None):
