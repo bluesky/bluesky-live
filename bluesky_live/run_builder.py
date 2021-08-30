@@ -76,6 +76,7 @@ class RunBuilder:
         self._cache.start(self._run_bundle.start_doc)
         # maps stream name to bundle returned by compose_descriptor
         self._streams = {}
+        self._next_seq_num = {}
 
     def add_stream(
         self,
@@ -154,6 +155,7 @@ class RunBuilder:
             hints=hints,
         )
         self._streams[name] = bundle
+        self._next_seq_num[name] = 1
         self._cache.descriptor(bundle.descriptor_doc)
         if data is not None:
             self.add_data(name=name, data=data, time=time)
@@ -203,7 +205,8 @@ class RunBuilder:
         if timestamps is None:
             timestamps = {k: [now] * len_ for k in data}
         if seq_num is None:
-            seq_num = (1 + numpy.arange(len_, dtype=int)).tolist()
+            seq_num = (self._next_seq_num[name] + numpy.arange(len_, dtype=int)).tolist()
+        self._next_seq_num[name] = 1 + seq_num[-1]
         bundle = self._streams[name]
         doc = bundle.compose_event_page(
             time=time,
