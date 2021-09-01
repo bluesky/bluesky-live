@@ -131,3 +131,21 @@ def test_write_lock():
         assert bool(len(run.primary.read()["a"]))
         thread.join()
         assert not failed.is_set()
+
+
+def test_event_stream_blocks():
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data("primary", {"a": [1, 2, 3], "b": [5, 6, 7]})
+        builder.add_data("primary", {"a": [4], "b": [8]})
+        builder.add_data("primary", {"a": [9], "b": [12]})
+        builder.add_data("primary", {"a": [10], "b": [13]})
+        builder.add_data("primary", {"a": [11], "b": [14]})
+    run.primary.read()
