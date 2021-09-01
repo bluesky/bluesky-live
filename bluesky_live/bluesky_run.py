@@ -1,6 +1,7 @@
 import collections
 import collections.abc
 from datetime import datetime
+import itertools
 import functools
 import threading
 
@@ -11,7 +12,7 @@ import xarray
 
 from .document import Start, Stop, Descriptor
 from .event import EmitterGroup, Event
-from .conversion import documents_to_xarray, documents_to_xarray_config
+from .conversion import documents_to_xarray_config
 from ._utils import (
     coerce_dask,
     discover_handlers,
@@ -101,14 +102,12 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_doc(name="event_page", doc=doc)
-        self.events.new_data(
-            updated={name: len(doc["seq_num"])}
-        )
+        self.events.new_data(updated={name: len(doc["seq_num"])})
         self.new_data_events[name](
             descriptor_uid=doc["descriptor"],
             num_rows=len(doc["seq_num"]),
             first_seq_num=doc["seq_num"][0],
-            update_index=len(self.event_pages[doc["descriptor"]]) - 1
+            update_index=len(self.event_pages[doc["descriptor"]]) - 1,
         )
         super().event_page(doc)
 
@@ -447,28 +446,37 @@ class BlueskyEventStream:
         # We need the data_keys, which are the same for any descriptor in this
         # stream, so we can grab the first one.
         descriptor = self._document_cache.streams[self._stream_name][0]
-        data_keys = descriptor["data_keys"]
-        # shape for evey block; use to determine shape needed later on
-        self.shapes = {key: data_key["shape"] for key, data_key in data_keys.items()}
+        self.data_keys = descriptor["data_keys"]
+        self.object_keys = descriptor.get("object_keys", {})
         # dict of lists of arrays
-        self.blocks = {key: [] for key in data_keys}
+        self.blocks = {key: [] for key in self.data_keys}
+        self.time_blocks = []
         self.allocated_rows = 0
         self.block_edges = [0]
         self.num_used_total = 0
-        self._document_cache.new_data_events[self._stream_name].connect(self._on_new_data)
+        self._document_cache.new_data_events[self._stream_name].connect(
+            self._on_new_data
+        )
 
     def _allocate_blocks(self, requested_rows):
         # add a row of blocks
         num_rows = max(EVENTS_PER_BLOCK, requested_rows)
         for key in self.blocks:
-            self.blocks[key].append(numpy.empty((num_rows, *self.shapes[key])))
+            self.blocks[key].append(
+                numpy.empty((num_rows, *self.data_keys[key]["shape"]))
+            )
+            self.time_blocks.append(numpy.empty((num_rows,)))
         self.allocated_rows += num_rows
         self.block_edges.append(self.block_edges[-1] + num_rows)
 
     def _on_new_data(self, event):
         # do we need new blocks
-        requested_rows = (event.first_seq_num - 1 + event.num_rows) - self.allocated_rows
-        event_page = self._document_cache.event_pages[event.descriptor_uid][event.update_index]
+        requested_rows = (
+            event.first_seq_num - 1 + event.num_rows
+        ) - self.allocated_rows
+        event_page = self._document_cache.event_pages[event.descriptor_uid][
+            event.update_index
+        ]
         if len(self.block_edges) > 1:
             offset = self.block_edges[-2]
         else:
@@ -477,12 +485,47 @@ class BlueskyEventStream:
             self._allocate_blocks(requested_rows)
             for key, blocks in self.blocks.items():
                 block = blocks[-1]
-                block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset - requested_rows] = event_page["data"][key][:-requested_rows]
+                time_block = self.time_blocks[-1]
+                block[
+                    event.first_seq_num
+                    - 1
+                    - offset : event.first_seq_num
+                    - 1
+                    + event.num_rows
+                    - offset
+                    - requested_rows
+                ] = event_page["data"][key][:-requested_rows]
+                time_block[
+                    event.first_seq_num
+                    - 1
+                    - offset : event.first_seq_num
+                    - 1
+                    + event.num_rows
+                    - offset
+                    - requested_rows
+                ] = event_page["time"][:-requested_rows]
                 block[:requested_rows] = event_page["data"][key][-requested_rows:]
+                time_block[:requested_rows] = event_page["time"][-requested_rows:]
         else:
             for key, blocks in self.blocks.items():
                 block = blocks[-1]
-                block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset] = event_page["data"][key]
+                time_block = self.time_blocks[-1]
+                block[
+                    event.first_seq_num
+                    - 1
+                    - offset : event.first_seq_num
+                    - 1
+                    + event.num_rows
+                    - offset
+                ] = event_page["data"][key]
+                time_block[
+                    event.first_seq_num
+                    - 1
+                    - offset : event.first_seq_num
+                    - 1
+                    + event.num_rows
+                    - offset
+                ] = event_page["time"]
         self.num_used_total = event.first_seq_num - 1 + event.num_rows
 
     @property
@@ -500,7 +543,48 @@ class BlueskyEventStream:
         ]
 
     def read(self):
-        return xarray.Dataset({key: dask.array.concatenate(block_list)[:self.num_used_total] if len(block_list) else numpy.array([]).reshape(0, *self.shapes[key]) for key, block_list in self.blocks.items()})
+        dim_counter = itertools.count()
+        data_arrays = {}
+        event_dim_labels = {}
+
+        # Make DataArrays for Event data.
+        for key, blocks in self.blocks.items():
+            field_metadata = self.data_keys[key]
+            # if the EventDescriptor doesn't provide names for the
+            # dimensions (it's optional) use the same default dimension
+            # names that xarray would.
+            try:
+                dims = tuple(field_metadata["dims"])
+            except KeyError:
+                ndim = len(field_metadata["shape"])
+                # Reuse dim labels.
+                try:
+                    dims = event_dim_labels[key]
+                except KeyError:
+                    dims = tuple(f"dim_{next(dim_counter)}" for _ in range(ndim))
+                    event_dim_labels[key] = dims
+            attrs = {}
+            # Record which object (i.e. device) this column is associated with,
+            # which enables one to find the relevant configuration, if any.
+            for object_name, keys_ in self.object_keys.items():
+                for item in keys_:
+                    if item == key:
+                        attrs["object"] = object_name
+                        break
+            if len(blocks):
+                data = dask.array.concatenate(blocks)[: self.num_used_total]
+                times = dask.array.concatenate(self.time_blocks)[: self.num_used_total]
+            else:
+                data = numpy.array([]).reshape(0, *field_metadata["shape"])
+                times = []
+            data_arrays[key] = xarray.DataArray(
+                data=data,
+                dims=("time",) + dims,
+                coords={"time": times},
+                name=key,
+                attrs=attrs,
+            )
+        return xarray.Dataset(data_vars=data_arrays)
 
 
 def _ft(timestamp):
