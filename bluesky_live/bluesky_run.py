@@ -4,8 +4,10 @@ from datetime import datetime
 import functools
 import threading
 
+import dask
 import event_model
 import numpy
+import xarray
 
 from .document import Start, Stop, Descriptor
 from .event import EmitterGroup, Event
@@ -452,6 +454,7 @@ class BlueskyEventStream:
         self.blocks = {key: [] for key in data_keys}
         self.allocated_rows = 0
         self.block_edges = [0]
+        self.num_used_total = 0
         self._document_cache.new_data_events[self._stream_name].connect(self._on_new_data)
 
     def _allocate_blocks(self, requested_rows):
@@ -466,15 +469,21 @@ class BlueskyEventStream:
         # do we need new blocks
         requested_rows = (event.first_seq_num - 1 + event.num_rows) - self.allocated_rows
         event_page = self._document_cache.event_pages[event.descriptor_uid][event.update_index]
+        if len(self.block_edges) > 1:
+            offset = self.block_edges[-2]
+        else:
+            offset = 0
         if requested_rows > 0:
             self._allocate_blocks(requested_rows)
-            # TODO
-        # else:
-        # data totally fits into current blocks we have
-        offset = self.block_edges[-2]
-        for key, blocks in self.blocks.items():
-            block = blocks[-1]
-            block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset] = event_page["data"][key]
+            for key, blocks in self.blocks.items():
+                block = blocks[-1]
+                block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset - requested_rows] = event_page["data"][key][:-requested_rows]
+                block[:requested_rows] = event_page["data"][key][-requested_rows:]
+        else:
+            for key, blocks in self.blocks.items():
+                block = blocks[-1]
+                block[event.first_seq_num - 1 - offset:event.first_seq_num - 1 + event.num_rows - offset] = event_page["data"][key]
+        self.num_used_total = event.first_seq_num - 1 + event.num_rows
 
     @property
     def name(self):
@@ -490,59 +499,8 @@ class BlueskyEventStream:
             for descriptor in self._document_cache.streams[self._stream_name]
         ]
 
-    def to_dask(self):
-        print("*** bluesky-live to_dask")
-        document_cache = self._document_cache
-
-        def get_event_pages(descriptor_uid, skip=0, limit=None):
-            if skip != 0 and limit is not None:
-                raise NotImplementedError
-            return document_cache.event_pages[descriptor_uid]
-
-        # def get_event_count(descriptor_uid):
-        #     return sum(len(page['seq_num'])
-        #                for page in (document_cache.event_pages[descriptor_uid]))
-
-        def get_resource(uid):
-            return document_cache.resources[uid]
-
-        # def get_resources():
-        #     return list(document_cache.resources.values())
-
-        def lookup_resource_for_datum(datum_id):
-            return document_cache.resource_uid_by_datum_id[datum_id]
-
-        def get_datum_pages(resource_uid, skip=0, limit=None):
-            if skip != 0 and limit is not None:
-                raise NotImplementedError
-            return document_cache.datum_pages_by_resource[resource_uid]
-
-        # This creates a potential conflict with databroker, which currently
-        # tries to register the same thing. For now our best effort to avoid
-        # this is to register this at the last possible moment to give
-        # databroker every chance of running first.
-        try:
-            event_model.register_coersion("delayed", coerce_dask)
-        except event_model.EventModelValueError:
-            # Already registered by databroker (or ourselves, earlier)
-            pass
-
-        filler = self._get_filler(coerce="delayed")
-
-        ds = documents_to_xarray(
-            start_doc=document_cache.start_doc,
-            stop_doc=document_cache.stop_doc,
-            descriptor_docs=self._descriptors,
-            get_event_pages=get_event_pages,
-            filler=filler,
-            get_resource=get_resource,
-            lookup_resource_for_datum=lookup_resource_for_datum,
-            get_datum_pages=get_datum_pages,
-        )
-        return ds
-
     def read(self):
-        return self.to_dask().load()
+        return xarray.Dataset({key: dask.array.concatenate(block_list)[:self.num_used_total] if len(block_list) else numpy.array([]).reshape(0, *self.shapes[key]) for key, block_list in self.blocks.items()})
 
 
 def _ft(timestamp):
