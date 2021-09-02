@@ -23,6 +23,14 @@ from ._utils import (
 
 EVENTS_PER_BLOCK = 5
 
+JSON_DTYPE_TO_MACHINE_DATA_TYPE = {
+    "boolean": numpy.dtype("bool"),
+    "number": numpy.dtype("float64"),
+    "integer": numpy.dtype("int64"),
+    "string": numpy.dtype("U256"),
+    "array": numpy.dtype("float64"),  # HACK This is not a good assumption.
+}
+
 
 def _write_locked(method):
     "This is used by DocumentCache to holds it write_lock during method calls."
@@ -463,7 +471,7 @@ class BlueskyEventStream:
         num_rows = max(EVENTS_PER_BLOCK, requested_rows)
         for key in self.blocks:
             self.blocks[key].append(
-                numpy.empty((num_rows, *self.data_keys[key]["shape"]))
+                numpy.empty((num_rows, *self.data_keys[key]["shape"]), dtype=JSON_DTYPE_TO_MACHINE_DATA_TYPE[self.data_keys[key]["dtype"]])
             )
             self.time_blocks.append(numpy.empty((num_rows,)))
         self.allocated_rows += num_rows
@@ -487,28 +495,29 @@ class BlueskyEventStream:
                 if event.num_rows == requested_rows:
                     # We are in the first block so we can update the most recent block
                     block = blocks[-1]
+                    time_block = self.time_blocks[-1]
                 else:
                     # We have multiple blocks and we need to fill the unfilled spots in the second most recent block
                     block = blocks[-2]
-                time_block = self.time_blocks[-1]
-                block[
-                    event.first_seq_num
-                    - 1
-                    - offset : event.first_seq_num
-                    - 1
-                    + event.num_rows
-                    - offset
-                    - requested_rows
-                ] = event_page["data"][key][:-requested_rows]
-                time_block[
-                    event.first_seq_num
-                    - 1
-                    - offset : event.first_seq_num
-                    - 1
-                    + event.num_rows
-                    - offset
-                    - requested_rows
-                ] = event_page["time"][:-requested_rows]
+                    time_block = self.time_blocks[-2]
+                    block[
+                        event.first_seq_num
+                        - 1
+                        - offset : event.first_seq_num
+                        - 1
+                        + event.num_rows
+                        - offset
+                        - requested_rows
+                    ] = event_page["data"][key][:-requested_rows]
+                    time_block[
+                        event.first_seq_num
+                        - 1
+                        - offset : event.first_seq_num
+                        - 1
+                        + event.num_rows
+                        - offset
+                        - requested_rows
+                    ] = event_page["time"][:-requested_rows]
                 # Most recent block
                 block = blocks[-1]
                 block[:requested_rows] = event_page["data"][key][-requested_rows:]
@@ -592,6 +601,10 @@ class BlueskyEventStream:
                 attrs=attrs,
             )
         return xarray.Dataset(data_vars=data_arrays)
+
+    def to_dask(self):
+        ds = self.read()
+        return xarray.Dataset({key: xarray.DataArray(dask.array.from_array(value), dims=value.dims) for key, value in ds.items()}, coords=ds.coords)
 
 
 def _ft(timestamp):
