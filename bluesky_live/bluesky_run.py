@@ -484,7 +484,12 @@ class BlueskyEventStream:
         if requested_rows > 0:
             self._allocate_blocks(requested_rows)
             for key, blocks in self.blocks.items():
-                block = blocks[-1]
+                if event.num_rows == requested_rows:
+                    # We are in the first block so we can update the most recent block
+                    block = blocks[-1]
+                else:
+                    # We have multiple blocks and we need to fill the unfilled spots in the second most recent block
+                    block = blocks[-2]
                 time_block = self.time_blocks[-1]
                 block[
                     event.first_seq_num
@@ -504,6 +509,8 @@ class BlueskyEventStream:
                     - offset
                     - requested_rows
                 ] = event_page["time"][:-requested_rows]
+                # Most recent block
+                block = blocks[-1]
                 block[:requested_rows] = event_page["data"][key][-requested_rows:]
                 time_block[:requested_rows] = event_page["time"][-requested_rows:]
         else:
@@ -572,8 +579,8 @@ class BlueskyEventStream:
                         attrs["object"] = object_name
                         break
             if len(blocks):
-                data = dask.array.concatenate(blocks)[: self.num_used_total]
-                times = dask.array.concatenate(self.time_blocks)[: self.num_used_total]
+                data = numpy.concatenate(blocks)[: self.num_used_total]
+                times = numpy.concatenate(self.time_blocks)[: self.num_used_total]
             else:
                 data = numpy.array([]).reshape(0, *field_metadata["shape"])
                 times = []
