@@ -57,6 +57,7 @@ from functools import wraps
 import inspect
 import logging
 import time
+from threading import Timer, RLock
 import traceback
 import warnings
 import weakref
@@ -99,6 +100,7 @@ class Event:
         self._native = native
         for k, v in kwargs.items():
             setattr(self, k, v)
+        self._lock = RLock()
 
     @property
     def source(self):
@@ -477,42 +479,41 @@ class EventEmitter:
         # create / massage event as needed
         event = self._prepare_event(*args, **kwargs)
 
-        # Add our source to the event; remove it after all callbacks have been
-        # invoked.
-        event._push_source(self.source)
-        try:
-            if blocked.get(None, 0) > 0:  # this is the same as self.blocked()
-                return event
+        with event._lock:
+            # Add our source to the event; remove it after all callbacks have been
+            # invoked.
+            event._push_source(self.source)
+            try:
+                if blocked.get(None, 0) > 0:  # this is the same as self.blocked()
+                    return event
 
-            rem = []
-            for cb in self._callbacks[:]:
-                if isinstance(cb, tuple):
-                    obj = cb[0]()
-                    if obj is None:
-                        rem.append(cb)
+                rem = []
+                for cb in self._callbacks[:]:
+                    if isinstance(cb, tuple):
+                        obj = cb[0]()
+                        if obj is None:
+                            rem.append(cb)
+                            continue
+                        cb = getattr(obj, cb[1], None)
+                        if cb is None:
+                            continue
+
+                    if blocked.get(cb, 0) > 0:
                         continue
-                    cb = getattr(obj, cb[1], None)
-                    if cb is None:
-                        continue
 
-                if blocked.get(cb, 0) > 0:
-                    continue
+                    self._invoke_callback(cb, event)
+                    if event.blocked:
+                        break
 
-                self._invoke_callback(cb, event)
-                if event.blocked:
-                    break
+                # remove callbacks to dead objects
+                for cb in rem:
+                    self.disconnect(cb)
+            finally:
+                pop_source_var = event._pop_source()
+                if pop_source_var is not self.source:
+                    raise RuntimeError("Event source-stack mismatch.")
 
-            # remove callbacks to dead objects
-            for cb in rem:
-                self.disconnect(cb)
-        finally:
-            pop_source_var = event._pop_source()
-            if pop_source_var is not self.source:
-                print(f'!!! {pop_source_var = }')
-                print(f'^^^ {self.source = }')
-                raise RuntimeError("Event source-stack mismatch.")
-
-        return event
+            return event
 
     def _invoke_callback(self, cb, event):
         try:
@@ -882,7 +883,6 @@ def debounce(function=None, wait: float = 0.2):
     """Postpone function call until `wait` seconds since last invokation."""
 
     def decorator(fn):
-        from threading import Timer
 
         _store: dict = {"timer": None, "last_call": 0.0, "params": ((), {})}
 
