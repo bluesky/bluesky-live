@@ -471,7 +471,10 @@ class BlueskyEventStream:
         num_rows = max(EVENTS_PER_BLOCK, requested_rows)
         for key in self.blocks:
             self.blocks[key].append(
-                numpy.empty((num_rows, *self.data_keys[key]["shape"]), dtype=JSON_DTYPE_TO_MACHINE_DATA_TYPE[self.data_keys[key]["dtype"]])
+                numpy.empty(
+                    (num_rows, *self.data_keys[key]["shape"]),
+                    dtype=JSON_DTYPE_TO_MACHINE_DATA_TYPE[self.data_keys[key]["dtype"]],
+                )
             )
             self.time_blocks.append(numpy.empty((num_rows,)))
         self.allocated_rows += num_rows
@@ -604,7 +607,13 @@ class BlueskyEventStream:
 
     def to_dask(self):
         ds = self.read()
-        return xarray.Dataset({key: xarray.DataArray(dask.array.from_array(value), dims=value.dims) for key, value in ds.items()}, coords=ds.coords)
+        return xarray.Dataset(
+            {
+                key: xarray.DataArray(dask.array.from_array(value), dims=value.dims)
+                for key, value in ds.items()
+            },
+            coords=ds.coords,
+        )
 
 
 def _ft(timestamp):

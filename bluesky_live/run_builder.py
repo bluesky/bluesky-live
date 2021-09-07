@@ -205,7 +205,9 @@ class RunBuilder:
         if timestamps is None:
             timestamps = {k: [now] * len_ for k in data}
         if seq_num is None:
-            seq_num = (self._next_seq_num[name] + numpy.arange(len_, dtype=int)).tolist()
+            seq_num = (
+                self._next_seq_num[name] + numpy.arange(len_, dtype=int)
+            ).tolist()
         self._next_seq_num[name] = 1 + seq_num[-1]
         bundle = self._streams[name]
         doc = bundle.compose_event_page(

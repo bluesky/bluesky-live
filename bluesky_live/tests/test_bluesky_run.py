@@ -195,7 +195,11 @@ def test_blocks_big_enough_for_new_data():
                 "b": {"shape": [], "dtype": "integer", "source": "whatever"},
             },
         )
-        builder.add_data("primary", {"a": [1, 2, 3, 4, 5, 6], "b": [7, 8, 9, 10, 11, 12]})
+        builder.add_data(
+            "primary", {"a": [1, 2, 3, 4, 5, 6], "b": [7, 8, 9, 10, 11, 12]}
+        )
         run.primary.read()
-        builder.add_data("primary", {"a": [13, 14, 15, 16, 17, 18], "b": [19, 20, 21, 22, 23, 24]})
+        builder.add_data(
+            "primary", {"a": [13, 14, 15, 16, 17, 18], "b": [19, 20, 21, 22, 23, 24]}
+        )
         run.primary.read()
