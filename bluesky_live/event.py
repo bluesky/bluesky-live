@@ -885,25 +885,28 @@ def debounce(function=None, wait: float = 0.2):
     def decorator(fn):
 
         _store: dict = {"timer": None, "last_call": 0.0, "params": ((), {})}
+        _lock = RLock()
 
         @wraps(fn)
         def debounced(*args, **kwargs):
-            _store["params"] = (args, kwargs)
-
             def call_it():
-                args, kwargs = _store["params"]
+                with _lock:
+                    _store["timer"] = None
+                    _store["last_call"] = time.monotonic()
+                    args, kwargs = _store["params"]
                 result = fn(*args, **kwargs)
-                _store["timer"] = None
-                _store["last_call"] = time.monotonic()
                 return result
 
-            if not _store["last_call"]:
-                return call_it()
+            with _lock:
+                _store["params"] = (args, kwargs)
 
-            if _store["timer"] is None:
-                time_since_last_call = time.monotonic() - _store["last_call"]
-                _store["timer"] = Timer(wait - time_since_last_call, call_it)
-                _store["timer"].start()  # type: ignore
+                if not _store["last_call"]:
+                    return call_it()
+
+                if _store["timer"] is None:
+                    time_since_last_call = time.monotonic() - _store["last_call"]
+                    _store["timer"] = Timer(wait - time_since_last_call, call_it)
+                    _store["timer"].start()  # type: ignore
 
         return debounced
 
