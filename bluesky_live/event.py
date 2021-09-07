@@ -53,8 +53,10 @@ For more information see http://github.com/vispy/vispy/wiki/API_Events
 """
 
 from collections import OrderedDict
+from functools import wraps
 import inspect
 import logging
+import time
 import traceback
 import warnings
 import weakref
@@ -504,7 +506,10 @@ class EventEmitter:
             for cb in rem:
                 self.disconnect(cb)
         finally:
-            if event._pop_source() != self.source:
+            pop_source_var = event._pop_source()
+            if pop_source_var is not self.source:
+                print(f'!!! {pop_source_var = }')
+                print(f'^^^ {self.source = }')
                 raise RuntimeError("Event source-stack mismatch.")
 
         return event
@@ -871,3 +876,38 @@ class EventBlockerAll:
 
 class CallbackException(Exception):
     pass
+
+
+def debounce(function=None, wait: float = 0.2):
+    """Postpone function call until `wait` seconds since last invokation."""
+
+    def decorator(fn):
+        from threading import Timer
+
+        _store: dict = {"timer": None, "last_call": 0.0, "params": ((), {})}
+
+        @wraps(fn)
+        def debounced(*args, **kwargs):
+            _store["params"] = (args, kwargs)
+
+            def call_it():
+                args, kwargs = _store["params"]
+                result = fn(*args, **kwargs)
+                _store["timer"] = None
+                _store["last_call"] = time.monotonic()
+                return result
+
+            if not _store["last_call"]:
+                return call_it()
+
+            if _store["timer"] is None:
+                time_since_last_call = time.monotonic() - _store["last_call"]
+                _store["timer"] = Timer(wait - time_since_last_call, call_it)
+                _store["timer"].start()  # type: ignore
+
+        return debounced
+
+    if function is None:
+        return decorator
+    else:
+        return decorator(function)
