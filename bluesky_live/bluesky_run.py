@@ -500,13 +500,14 @@ class BlueskyEventStream:
                     block = blocks[-1]
                     time_block = self.time_blocks[-1]
                 else:
-                    # We have multiple blocks and we need to fill the unfilled spots in the second most recent block
+                    # We have multiple blocks and we need to fill the unfilled spots
+                    # in the second most recent block
                     block = blocks[-2]
                     time_block = self.time_blocks[-2]
                     block[
                         event.first_seq_num
                         - 1
-                        - offset : event.first_seq_num
+                        - offset: event.first_seq_num
                         - 1
                         + event.num_rows
                         - offset
@@ -515,7 +516,7 @@ class BlueskyEventStream:
                     time_block[
                         event.first_seq_num
                         - 1
-                        - offset : event.first_seq_num
+                        - offset: event.first_seq_num
                         - 1
                         + event.num_rows
                         - offset
@@ -532,7 +533,7 @@ class BlueskyEventStream:
                 block[
                     event.first_seq_num
                     - 1
-                    - offset : event.first_seq_num
+                    - offset: event.first_seq_num
                     - 1
                     + event.num_rows
                     - offset
@@ -540,7 +541,7 @@ class BlueskyEventStream:
                 time_block[
                     event.first_seq_num
                     - 1
-                    - offset : event.first_seq_num
+                    - offset: event.first_seq_num
                     - 1
                     + event.num_rows
                     - offset
