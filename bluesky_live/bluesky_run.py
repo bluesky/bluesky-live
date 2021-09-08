@@ -507,7 +507,7 @@ class BlueskyEventStream:
                     block[
                         event.first_seq_num
                         - 1
-                        - offset: event.first_seq_num
+                        - offset : event.first_seq_num  # noqa: E203
                         - 1
                         + event.num_rows
                         - offset
@@ -516,7 +516,7 @@ class BlueskyEventStream:
                     time_block[
                         event.first_seq_num
                         - 1
-                        - offset: event.first_seq_num
+                        - offset : event.first_seq_num  # noqa: E203
                         - 1
                         + event.num_rows
                         - offset
@@ -533,7 +533,7 @@ class BlueskyEventStream:
                 block[
                     event.first_seq_num
                     - 1
-                    - offset: event.first_seq_num
+                    - offset : event.first_seq_num  # noqa: E203
                     - 1
                     + event.num_rows
                     - offset
@@ -541,7 +541,7 @@ class BlueskyEventStream:
                 time_block[
                     event.first_seq_num
                     - 1
-                    - offset: event.first_seq_num
+                    - offset : event.first_seq_num  # noqa: E203
                     - 1
                     + event.num_rows
                     - offset
