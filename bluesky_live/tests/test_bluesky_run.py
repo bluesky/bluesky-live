@@ -147,7 +147,33 @@ def test_event_stream_blocks():
         builder.add_data("primary", {"a": [7], "b": [8]})
         builder.add_data("primary", {"a": [9], "b": [10]})
         builder.add_data("primary", {"a": [11], "b": [12]})
-    run.primary.read()
+        run.primary.read()
+
+
+def test_add_data_one_at_a_time():
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data("primary", {"a": [1], "b": [2]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [3], "b": [4]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [5], "b": [6]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [7], "b": [8]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [9], "b": [10]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [11], "b": [12]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [13], "b": [14]})
+        run.primary.read()
 
 
 def test_new_data_starts_new_block():

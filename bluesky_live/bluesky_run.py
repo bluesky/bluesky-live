@@ -481,7 +481,7 @@ class BlueskyEventStream:
         self.block_edges.append(self.block_edges[-1] + num_rows)
 
     def _on_new_data(self, event):
-        # do we need new blocks
+        # Determine if we need any new blocks
         requested_rows = (
             event.first_seq_num - 1 + event.num_rows
         ) - self.allocated_rows
@@ -493,17 +493,17 @@ class BlueskyEventStream:
         else:
             offset = 0
         if requested_rows > 0:
-            self._allocate_blocks(requested_rows)
-            for key, blocks in self.blocks.items():
-                if event.num_rows == requested_rows:
-                    # We are in the first block so we can update the most recent block
+            # We want to fill any unfilled blocks first, then allocate more blocks,
+            # and put the remaining data in the new blocks.
+            if event.num_rows == requested_rows:
+                # We are in the first block so we don't have any previous blocks to fill.
+                pass
+            else:
+                # We will have multiple blocks and need to fill the most recent
+                # block before allocating more blocks.
+                for key, blocks in self.blocks.items():
                     block = blocks[-1]
                     time_block = self.time_blocks[-1]
-                else:
-                    # We have multiple blocks and we need to fill the unfilled spots
-                    # in the second most recent block
-                    block = blocks[-2]
-                    time_block = self.time_blocks[-2]
                     block[
                         event.first_seq_num
                         - 1
@@ -522,10 +522,15 @@ class BlueskyEventStream:
                         - offset
                         - requested_rows
                     ] = event_page["time"][:-requested_rows]
-                # Most recent block
+            # Allocate more blocks
+            self._allocate_blocks(requested_rows)
+            for key, blocks in self.blocks.items():
+                # Now we can fill the newly created block
                 block = blocks[-1]
+                time_block = self.time_blocks[-1]
                 block[:requested_rows] = event_page["data"][key][-requested_rows:]
                 time_block[:requested_rows] = event_page["time"][-requested_rows:]
+
         else:
             for key, blocks in self.blocks.items():
                 block = blocks[-1]
