@@ -131,3 +131,101 @@ def test_write_lock():
         assert bool(len(run.primary.read()["a"]))
         thread.join()
         assert not failed.is_set()
+
+
+def test_event_stream_blocks():
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data("primary", {"a": [1, 2, 3], "b": [4, 5, 6]})
+        builder.add_data("primary", {"a": [7], "b": [8]})
+        builder.add_data("primary", {"a": [9], "b": [10]})
+        builder.add_data("primary", {"a": [11], "b": [12]})
+        run.primary.read()
+
+
+def test_add_data_one_at_a_time():
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data("primary", {"a": [1], "b": [2]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [3], "b": [4]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [5], "b": [6]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [7], "b": [8]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [9], "b": [10]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [11], "b": [12]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [13], "b": [14]})
+        run.primary.read()
+
+
+def test_new_data_starts_new_block():
+    # Test when the new data starts cleanly in a new block
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data("primary", {"a": [1, 2, 3, 4, 5], "b": [6, 7, 8, 9, 10]})
+        builder.add_data("primary", {"a": [11], "b": [12]})
+        run.primary.read()
+        builder.add_data("primary", {"a": [13, 14, 15, 16], "b": [17, 18, 19, 20]})
+        run.primary.read()
+
+
+def test_new_data_fills_one_block_and_needs_another():
+    # Test when the 1st block needs to be filled and another block is needed
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data("primary", {"a": [1, 2, 3], "b": [7, 8, 9]})
+        builder.add_data("primary", {"a": [4, 5, 6], "b": [10, 11, 12]})
+    run.primary.read()
+
+
+def test_blocks_big_enough_for_new_data():
+    # Test the first block starts with enough rows for initial data
+    with RunBuilder() as builder:
+        run = builder.get_run()
+        builder.add_stream(
+            "primary",
+            data_keys={
+                "a": {"shape": [], "dtype": "integer", "source": "whatever"},
+                "b": {"shape": [], "dtype": "integer", "source": "whatever"},
+            },
+        )
+        builder.add_data(
+            "primary", {"a": [1, 2, 3, 4, 5, 6], "b": [7, 8, 9, 10, 11, 12]}
+        )
+        run.primary.read()
+        builder.add_data(
+            "primary", {"a": [13, 14, 15, 16, 17, 18], "b": [19, 20, 21, 22, 23, 24]}
+        )
+        run.primary.read()

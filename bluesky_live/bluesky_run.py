@@ -1,20 +1,35 @@
 import collections
 import collections.abc
 from datetime import datetime
+import itertools
 import functools
 import threading
 
+import dask
 import event_model
+import numpy
+import xarray
 
 from .document import Start, Stop, Descriptor
 from .event import EmitterGroup, Event
-from .conversion import documents_to_xarray, documents_to_xarray_config
+from .conversion import documents_to_xarray_config
 from ._utils import (
     coerce_dask,
     discover_handlers,
     parse_transforms,
     parse_handler_registry,
 )
+
+
+EVENTS_PER_BLOCK = 5
+
+JSON_DTYPE_TO_MACHINE_DATA_TYPE = {
+    "boolean": numpy.dtype("bool"),
+    "number": numpy.dtype("float64"),
+    "integer": numpy.dtype("int64"),
+    "string": numpy.dtype("U256"),
+    "array": numpy.dtype("float64"),  # HACK This is not a good assumption.
+}
 
 
 def _write_locked(method):
@@ -58,6 +73,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
             completed=Event,
             new_doc=Event,
         )
+        self.new_data_events = EmitterGroup(source=self)
         # maps stream name to list of descriptors
         self._streams = {}
         # list of (name, doc) pairs in the order they were consumed
@@ -90,11 +106,16 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
 
     @_write_locked
     def event_page(self, doc):
+        name = self.descriptors[doc["descriptor"]]["name"]
         self._ordered.append(("event_page", doc))
         self.event_pages[doc["descriptor"]].append(doc)
         self.events.new_doc(name="event_page", doc=doc)
-        self.events.new_data(
-            updated={self.descriptors[doc["descriptor"]]["name"]: len(doc["seq_num"])}
+        self.events.new_data(updated={name: len(doc["seq_num"])})
+        self.new_data_events[name](
+            descriptor_uid=doc["descriptor"],
+            num_rows=len(doc["seq_num"]),
+            first_seq_num=doc["seq_num"][0],
+            update_index=len(self.event_pages[doc["descriptor"]]) - 1,
         )
         super().event_page(doc)
 
@@ -114,6 +135,7 @@ class DocumentCache(event_model.SingleRunDocumentRouter):
         self.descriptors[doc["uid"]] = doc
         if name is not None and name not in self._streams:
             self._streams[name] = [doc]
+            self.new_data_events.add(**{name: Event})
             self.events.new_stream(name=name)
         else:
             self._streams[name].append(doc)
@@ -429,6 +451,107 @@ class BlueskyEventStream:
         self._get_filler = get_filler
         self._transform = transform
         self.config = ConfigAccessor(self)
+        # We need the data_keys, which are the same for any descriptor in this
+        # stream, so we can grab the first one.
+        descriptor = self._document_cache.streams[self._stream_name][0]
+        self.data_keys = descriptor["data_keys"]
+        self.object_keys = descriptor.get("object_keys", {})
+        # dict of lists of arrays
+        self.blocks = {key: [] for key in self.data_keys}
+        self.time_blocks = []
+        self.allocated_rows = 0
+        self.block_edges = [0]
+        self.num_used_total = 0
+        self._document_cache.new_data_events[self._stream_name].connect(
+            self._on_new_data
+        )
+
+    def _allocate_blocks(self, requested_rows):
+        # add a row of blocks
+        num_rows = max(EVENTS_PER_BLOCK, requested_rows)
+        for key in self.blocks:
+            self.blocks[key].append(
+                numpy.empty(
+                    (num_rows, *self.data_keys[key]["shape"]),
+                    dtype=JSON_DTYPE_TO_MACHINE_DATA_TYPE[self.data_keys[key]["dtype"]],
+                )
+            )
+            self.time_blocks.append(numpy.empty((num_rows,)))
+        self.allocated_rows += num_rows
+        self.block_edges.append(self.block_edges[-1] + num_rows)
+
+    def _on_new_data(self, event):
+        # Determine if we need any new blocks
+        requested_rows = (
+            event.first_seq_num - 1 + event.num_rows
+        ) - self.allocated_rows
+        event_page = self._document_cache.event_pages[event.descriptor_uid][
+            event.update_index
+        ]
+        if len(self.block_edges) > 1:
+            offset = self.block_edges[-2]
+        else:
+            offset = 0
+        if requested_rows > 0:
+            # We want to fill any unfilled blocks first, then allocate more blocks,
+            # and put the remaining data in the new blocks.
+            if event.num_rows == requested_rows:
+                # We are in the first block so we don't have any previous blocks to fill.
+                pass
+            else:
+                # We will have multiple blocks and need to fill the most recent
+                # block before allocating more blocks.
+                for key, blocks in self.blocks.items():
+                    block = blocks[-1]
+                    time_block = self.time_blocks[-1]
+                    block[
+                        event.first_seq_num
+                        - 1
+                        - offset : event.first_seq_num  # noqa: E203
+                        - 1
+                        + event.num_rows
+                        - offset
+                        - requested_rows
+                    ] = event_page["data"][key][:-requested_rows]
+                    time_block[
+                        event.first_seq_num
+                        - 1
+                        - offset : event.first_seq_num  # noqa: E203
+                        - 1
+                        + event.num_rows
+                        - offset
+                        - requested_rows
+                    ] = event_page["time"][:-requested_rows]
+            # Allocate more blocks
+            self._allocate_blocks(requested_rows)
+            for key, blocks in self.blocks.items():
+                # Now we can fill the newly created block
+                block = blocks[-1]
+                time_block = self.time_blocks[-1]
+                block[:requested_rows] = event_page["data"][key][-requested_rows:]
+                time_block[:requested_rows] = event_page["time"][-requested_rows:]
+
+        else:
+            for key, blocks in self.blocks.items():
+                block = blocks[-1]
+                time_block = self.time_blocks[-1]
+                block[
+                    event.first_seq_num
+                    - 1
+                    - offset : event.first_seq_num  # noqa: E203
+                    - 1
+                    + event.num_rows
+                    - offset
+                ] = event_page["data"][key]
+                time_block[
+                    event.first_seq_num
+                    - 1
+                    - offset : event.first_seq_num  # noqa: E203
+                    - 1
+                    + event.num_rows
+                    - offset
+                ] = event_page["time"]
+        self.num_used_total = event.first_seq_num - 1 + event.num_rows
 
     @property
     def name(self):
@@ -444,59 +567,59 @@ class BlueskyEventStream:
             for descriptor in self._document_cache.streams[self._stream_name]
         ]
 
-    def to_dask(self):
-
-        document_cache = self._document_cache
-
-        def get_event_pages(descriptor_uid, skip=0, limit=None):
-            if skip != 0 and limit is not None:
-                raise NotImplementedError
-            return document_cache.event_pages[descriptor_uid]
-
-        # def get_event_count(descriptor_uid):
-        #     return sum(len(page['seq_num'])
-        #                for page in (document_cache.event_pages[descriptor_uid]))
-
-        def get_resource(uid):
-            return document_cache.resources[uid]
-
-        # def get_resources():
-        #     return list(document_cache.resources.values())
-
-        def lookup_resource_for_datum(datum_id):
-            return document_cache.resource_uid_by_datum_id[datum_id]
-
-        def get_datum_pages(resource_uid, skip=0, limit=None):
-            if skip != 0 and limit is not None:
-                raise NotImplementedError
-            return document_cache.datum_pages_by_resource[resource_uid]
-
-        # This creates a potential conflict with databroker, which currently
-        # tries to register the same thing. For now our best effort to avoid
-        # this is to register this at the last possible moment to give
-        # databroker every chance of running first.
-        try:
-            event_model.register_coersion("delayed", coerce_dask)
-        except event_model.EventModelValueError:
-            # Already registered by databroker (or ourselves, earlier)
-            pass
-
-        filler = self._get_filler(coerce="delayed")
-
-        ds = documents_to_xarray(
-            start_doc=document_cache.start_doc,
-            stop_doc=document_cache.stop_doc,
-            descriptor_docs=self._descriptors,
-            get_event_pages=get_event_pages,
-            filler=filler,
-            get_resource=get_resource,
-            lookup_resource_for_datum=lookup_resource_for_datum,
-            get_datum_pages=get_datum_pages,
-        )
-        return ds
-
     def read(self):
-        return self.to_dask().load()
+        dim_counter = itertools.count()
+        data_arrays = {}
+        event_dim_labels = {}
+
+        # Make DataArrays for Event data.
+        for key, blocks in self.blocks.items():
+            field_metadata = self.data_keys[key]
+            # if the EventDescriptor doesn't provide names for the
+            # dimensions (it's optional) use the same default dimension
+            # names that xarray would.
+            try:
+                dims = tuple(field_metadata["dims"])
+            except KeyError:
+                ndim = len(field_metadata["shape"])
+                # Reuse dim labels.
+                try:
+                    dims = event_dim_labels[key]
+                except KeyError:
+                    dims = tuple(f"dim_{next(dim_counter)}" for _ in range(ndim))
+                    event_dim_labels[key] = dims
+            attrs = {}
+            # Record which object (i.e. device) this column is associated with,
+            # which enables one to find the relevant configuration, if any.
+            for object_name, keys_ in self.object_keys.items():
+                for item in keys_:
+                    if item == key:
+                        attrs["object"] = object_name
+                        break
+            if len(blocks):
+                data = numpy.concatenate(blocks)[: self.num_used_total]
+                times = numpy.concatenate(self.time_blocks)[: self.num_used_total]
+            else:
+                data = numpy.array([]).reshape(0, *field_metadata["shape"])
+                times = []
+            data_arrays[key] = xarray.DataArray(
+                data=data,
+                dims=("time",) + dims,
+                coords={"time": times},
+                name=key,
+                attrs=attrs,
+            )
+        return xarray.Dataset(data_vars=data_arrays)
+
+    def to_dask(self):
+        ds = self.read()
+        return xarray.Dataset(
+            {
+                key: xarray.DataArray(dask.array.from_array(value), dims=value.dims)
+                for key, value in ds.items()
+            },
+            coords=ds.coords,
+        )
 
 
 def _ft(timestamp):
